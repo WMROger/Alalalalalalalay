@@ -418,6 +418,50 @@ export async function scanAndExtractDocumentMetadata(fileOrName, customFields = 
 }
 
 /**
+ * 1.5. Upload Verification — checks that an OCR-scanned document actually matches what
+ * was required, either a specific requirement (e.g. uploading to satisfy a missing
+ * "PhilHealth MDR") or generically against the category the citizen selected in the
+ * upload form. Deterministic, mirroring the rest of DocAgent's rules-primacy design —
+ * no AI judgment call, just a straight comparison against the extracted type/confidence.
+ */
+export function verifyDocumentUpload(extracted, requiredType = null) {
+  const confidence = extracted?.confidenceScore || 0;
+  const detectedType = extracted?.type || 'Unknown Document';
+  const normalize = (t) => (t || '').toLowerCase().trim();
+  const typeMatches = !requiredType || normalize(detectedType) === normalize(requiredType);
+
+  if (!typeMatches) {
+    return {
+      status: 'mismatch',
+      confidence,
+      detectedType,
+      requiredType,
+      message: `This looks like a ${detectedType}, but a ${requiredType} is required here. Please double-check before saving, or re-upload the correct document.`,
+    };
+  }
+
+  if (confidence < 90) {
+    return {
+      status: 'review',
+      confidence,
+      detectedType,
+      requiredType,
+      message: `DocAgent is only ${confidence}% confident this is a clear, valid ${detectedType}. Please confirm the extracted details below are correct before saving.`,
+    };
+  }
+
+  return {
+    status: 'verified',
+    confidence,
+    detectedType,
+    requiredType,
+    message: requiredType
+      ? `Verified — this matches the required ${requiredType}.`
+      : `Verified — matches ${detectedType} with high confidence.`,
+  };
+}
+
+/**
  * 2. Proactive Expiration & Audit Evaluator
  */
 export function auditVaultDocuments(documents = []) {

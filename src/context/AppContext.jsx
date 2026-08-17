@@ -455,6 +455,10 @@ export const AppProvider = ({ children }) => {
   const [askAlalayOpportunity, setAskAlalayOpportunity] = useState(null);
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
   const [uploadModalPrefill, setUploadModalPrefill] = useState(null);
+  // Carries a request from an opportunity's requirements checklist into the Apply-with-AI
+  // tab: which intake program to open, whether to auto-complete/review it immediately
+  // (vs. the normal conversational fill-out), and which opportunity to return to once done.
+  const [pendingApplyRequest, setPendingApplyRequest] = useState(null);
   const [addSourceModalOpen, setAddSourceModalOpen] = useState(false);
   const [activeDocumentForPreview, setActiveDocumentForPreview] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -1889,6 +1893,8 @@ export const AppProvider = ({ children }) => {
         uploadModalPrefill,
         setUploadModalPrefill,
         openUploadForRequirement,
+        pendingApplyRequest,
+        setPendingApplyRequest,
         addSourceModalOpen,
         setAddSourceModalOpen,
         activeDocumentForPreview,

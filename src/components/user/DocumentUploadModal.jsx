@@ -14,11 +14,12 @@ import {
   RefreshCw,
   Eye,
   Check,
+  AlertTriangle,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { IOSSheet } from '../common/IOSSheet';
 import { IOSButton } from '../common/IOSButton';
-import { scanAndExtractDocumentMetadata, OCR_PRESET_TEMPLATES, getDocumentPlaceholderThumbnail } from '../../services/docAgentService';
+import { scanAndExtractDocumentMetadata, OCR_PRESET_TEMPLATES, getDocumentPlaceholderThumbnail, verifyDocumentUpload } from '../../services/docAgentService';
 
 export const DocumentUploadModal = () => {
   const {
@@ -43,6 +44,12 @@ export const DocumentUploadModal = () => {
   const [syncToProfile, setSyncToProfile] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  // The specific document type this upload is meant to satisfy (e.g. opened from a
+  // "Upload Missing Item" prompt for a required credential), kept around after the
+  // prefill itself is consumed so verification can check the scan against it.
+  const [requiredType, setRequiredType] = useState(null);
+  const [verification, setVerification] = useState(null);
+  const [mismatchAcknowledged, setMismatchAcknowledged] = useState(false);
 
   // Pre-fill the form when opened from a specific missing requirement (e.g. from a
   // checklist in chat or on the opportunity page), so the citizen doesn't have to
@@ -52,6 +59,7 @@ export const DocumentUploadModal = () => {
     if (uploadModalOpen && uploadModalPrefill) {
       setDocName(uploadModalPrefill.name || '');
       setDocType(uploadModalPrefill.type || 'National ID / Gov ID');
+      setRequiredType(uploadModalPrefill.type || null);
       setUploadModalPrefill(null);
     }
   }, [uploadModalOpen, uploadModalPrefill, setUploadModalPrefill]);
@@ -71,6 +79,7 @@ export const DocumentUploadModal = () => {
   // Process Document with DocAgent OCR
   const handleProcessFileWithDocAgent = async (fileOrName) => {
     setIsScanningOcr(true);
+    setMismatchAcknowledged(false);
     try {
       const extracted = await scanAndExtractDocumentMetadata(fileOrName);
       setOcrResult(extracted);
@@ -79,11 +88,21 @@ export const DocumentUploadModal = () => {
       setIssuer(extracted.issuer);
       setDocNumber(extracted.documentNumber);
       setExpirationDate(extracted.expirationDate);
-      addToast(
-        'DocAgent OCR Complete',
-        `Extracted ${extracted.name} (${extracted.confidenceScore}% confidence score).`,
-        'success'
-      );
+
+      const verified = verifyDocumentUpload(extracted, requiredType);
+      setVerification(verified);
+
+      if (verified.status === 'mismatch') {
+        addToast('DocAgent Verification Warning', verified.message, 'error');
+      } else if (verified.status === 'review') {
+        addToast('DocAgent OCR Complete', verified.message, 'info');
+      } else {
+        addToast(
+          'DocAgent OCR Complete',
+          `Extracted ${extracted.name} (${extracted.confidenceScore}% confidence score).`,
+          'success'
+        );
+      }
     } catch (err) {
       console.warn('DocAgent OCR Error:', err);
     } finally {
@@ -119,6 +138,9 @@ export const DocumentUploadModal = () => {
   const handleSubmit = (e) => {
     e.preventDefault();
     if (!docName) return;
+    // A flagged type mismatch against a specific requirement must be explicitly
+    // acknowledged before saving — this is the whole point of verifying the upload.
+    if (verification?.status === 'mismatch' && !mismatchAcknowledged) return;
 
     setIsUploading(true);
     setUploadProgress(30);
@@ -158,6 +180,9 @@ export const DocumentUploadModal = () => {
       setDocName('');
       setSelectedFile(null);
       setOcrResult(null);
+      setVerification(null);
+      setRequiredType(null);
+      setMismatchAcknowledged(false);
       setUploadModalOpen(false);
       if (setUploadModalPrefill) setUploadModalPrefill(null);
     }, 900);
@@ -169,6 +194,9 @@ export const DocumentUploadModal = () => {
       onClose={() => {
         setUploadModalOpen(false);
         setOcrResult(null);
+        setVerification(null);
+        setRequiredType(null);
+        setMismatchAcknowledged(false);
         if (setUploadModalPrefill) setUploadModalPrefill(null);
       }}
       title="DocAgent Document Vault"
@@ -255,18 +283,66 @@ export const DocumentUploadModal = () => {
           </div>
         </div>
 
-        {/* OCR Result Preview Card */}
+        {/* OCR Result & Verification Preview Card */}
         {ocrResult && (
-          <div className="p-3.5 rounded-2xl bg-gradient-to-r from-blue-50/90 to-indigo-50/60 border border-blue-200/80 space-y-2 animate-in fade-in zoom-in-95">
+          <div
+            className={`p-3.5 rounded-2xl border space-y-2 animate-in fade-in zoom-in-95 ${
+              verification?.status === 'mismatch'
+                ? 'bg-gradient-to-r from-rose-50/90 to-red-50/60 border-rose-200/80'
+                : verification?.status === 'review'
+                ? 'bg-gradient-to-r from-amber-50/90 to-yellow-50/60 border-amber-200/80'
+                : 'bg-gradient-to-r from-blue-50/90 to-indigo-50/60 border-blue-200/80'
+            }`}
+          >
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-1.5 text-xs font-bold text-[#093a96]">
-                <ShieldCheck className="w-4 h-4 text-emerald-600" />
-                <span>DocAgent Extraction Verified</span>
+              <div
+                className={`flex items-center gap-1.5 text-xs font-bold ${
+                  verification?.status === 'mismatch'
+                    ? 'text-rose-700'
+                    : verification?.status === 'review'
+                    ? 'text-amber-800'
+                    : 'text-[#093a96]'
+                }`}
+              >
+                {verification?.status === 'mismatch' || verification?.status === 'review' ? (
+                  <AlertTriangle className="w-4 h-4" />
+                ) : (
+                  <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                )}
+                <span>
+                  {verification?.status === 'mismatch'
+                    ? 'Verification Warning'
+                    : verification?.status === 'review'
+                    ? 'Needs a Quick Double-Check'
+                    : 'DocAgent Extraction Verified'}
+                </span>
               </div>
-              <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-black border border-emerald-300">
+              <span
+                className={`px-2 py-0.5 rounded-full text-[10px] font-black border ${
+                  verification?.status === 'mismatch'
+                    ? 'bg-rose-100 text-rose-800 border-rose-300'
+                    : verification?.status === 'review'
+                    ? 'bg-amber-100 text-amber-900 border-amber-300'
+                    : 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                }`}
+              >
                 {ocrResult.confidenceScore}% Confidence
               </span>
             </div>
+
+            {verification?.message && (
+              <p
+                className={`text-[11px] leading-relaxed font-medium ${
+                  verification.status === 'mismatch'
+                    ? 'text-rose-800'
+                    : verification.status === 'review'
+                    ? 'text-amber-900'
+                    : 'text-slate-700'
+                }`}
+              >
+                {verification.message}
+              </p>
+            )}
 
             <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-700 font-medium">
               <div className="p-2 rounded-xl bg-white border border-blue-100">
@@ -282,6 +358,19 @@ export const DocumentUploadModal = () => {
                 </span>
               </div>
             </div>
+
+            {/* Mismatch acknowledgment gate — must be checked before saving */}
+            {verification?.status === 'mismatch' && (
+              <label className="flex items-center gap-2 pt-1 text-[11px] font-bold text-rose-800 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={mismatchAcknowledged}
+                  onChange={(e) => setMismatchAcknowledged(e.target.checked)}
+                  className="w-3.5 h-3.5 text-rose-600 rounded accent-rose-600"
+                />
+                <span>I confirm this is the correct document despite the warning above</span>
+              </label>
+            )}
 
             {/* Profile Auto-Sync Checkbox */}
             <label className="flex items-center gap-2 pt-1 text-[11px] font-bold text-slate-700 cursor-pointer">
@@ -409,7 +498,7 @@ export const DocumentUploadModal = () => {
               variant="primary"
               size="md"
               type="submit"
-              disabled={isUploading || !docName}
+              disabled={isUploading || !docName || (verification?.status === 'mismatch' && !mismatchAcknowledged)}
             >
               Save to Vault
             </IOSButton>

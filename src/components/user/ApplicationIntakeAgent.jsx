@@ -38,6 +38,16 @@ import {
 import { getDocumentPlaceholderThumbnail } from '../../services/docAgentService';
 import logoImg from '../../assets/logos.png';
 
+// Maps a session's filled fields into the flat {fieldId: value} shape both FormReview's
+// editable state and the auto-save payload need.
+const buildEditableFieldsFromSession = (session) => {
+  const map = {};
+  (session?.template?.fields || []).forEach((f) => {
+    map[f.id] = session.filledFields[f.id]?.value || '';
+  });
+  return map;
+};
+
 // =============================================================================
 // SOURCE BADGE — shows where a field value came from
 // =============================================================================
@@ -290,15 +300,19 @@ const AgentMessage = ({ text }) => {
 // PHASE 2 — CONVERSATIONAL INTAKE
 // =============================================================================
 const IntakeConversation = ({ program, session: initialSession, user, onComplete, onBack }) => {
+  const { addToast } = useApp();
   const [session, setSession] = useState(initialSession);
   const [messages, setMessages] = useState([]);
   const [inputValue, setInputValue] = useState('');
   const [isThinking, setIsThinking] = useState(false);
   const [currentFieldId, setCurrentFieldId] = useState(null);
+  const [readyToAutoComplete, setReadyToAutoComplete] = useState(false);
   const chatEndRef = useRef(null);
   const inputRef = useRef(null);
 
-  // Initialize with opening greeting
+  // Initialize with opening greeting + a gap-analysis notification so the citizen
+  // immediately knows whether ALALAY already has everything it needs, or how many
+  // questions remain, before diving into the conversation.
   useEffect(() => {
     const greeting = generateOpeningGreeting(initialSession, user);
     const activeGaps = getActiveGapFields(initialSession);
@@ -308,10 +322,23 @@ const IntakeConversation = ({ program, session: initialSession, user, onComplete
     setCurrentFieldId(firstField?.id || null);
 
     if (activeGaps.length === 0) {
-      // All fields already filled — skip to complete
-      setTimeout(() => onComplete(initialSession), 500);
+      addToast(
+        '✅ Form Ready',
+        `ALALAY already has everything needed for your ${program.shortTitle} application from your profile and vault.`,
+        'success'
+      );
+      // Wait for the citizen to confirm via the Auto-Complete button instead of
+      // silently skipping ahead — they should see and approve what's about to happen.
+      setReadyToAutoComplete(true);
+    } else {
+      addToast(
+        '📝 A Few Questions Needed',
+        `ALALAY filled most of your ${program.shortTitle} application already — just ${activeGaps.length} question${activeGaps.length > 1 ? 's' : ''} left.`,
+        'info'
+      );
     }
-  }, [initialSession, user, onComplete]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialSession, user]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -459,6 +486,32 @@ const IntakeConversation = ({ program, session: initialSession, user, onComplete
               </div>
             </div>
           )}
+
+          {/* Auto-Complete confirmation — shown instead of silently skipping ahead when
+              every field was already resolved from the citizen's profile and vault. */}
+          {readyToAutoComplete && !isThinking && (
+            <div className="flex items-end gap-2">
+              <div className="w-7 h-7 rounded-xl bg-gradient-to-br from-[#093a96] to-blue-500 flex items-center justify-center flex-shrink-0 shadow-sm">
+                <Sparkles className="w-3.5 h-3.5 text-white" />
+              </div>
+              <div className="bg-white border border-slate-200 rounded-2xl rounded-tl-sm px-4 py-3.5 shadow-sm max-w-[82%] space-y-2.5">
+                <p className="text-sm text-slate-800 leading-relaxed">
+                  Everything's filled in — ready when you are.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setReadyToAutoComplete(false);
+                    onComplete(session);
+                  }}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-[#093a96] text-white text-xs font-bold hover:bg-blue-700 active:scale-[0.98] transition-all cursor-pointer shadow-md shadow-blue-900/20"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  Auto-Complete with ALALAY
+                </button>
+              </div>
+            </div>
+          )}
           <div ref={chatEndRef} />
         </div>
 
@@ -483,8 +536,8 @@ const IntakeConversation = ({ program, session: initialSession, user, onComplete
                   e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
                 }}
                 onKeyDown={handleKeyDown}
-                placeholder="Type your answer here..."
-                disabled={isThinking || session.isComplete}
+                placeholder={readyToAutoComplete ? 'Tap Auto-Complete with ALALAY above to continue...' : 'Type your answer here...'}
+                disabled={isThinking || session.isComplete || readyToAutoComplete}
                 className="w-full resize-none rounded-2xl border border-slate-200 px-4 py-3 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#093a96]/30 focus:border-[#093a96] transition-all bg-slate-50 disabled:opacity-50 min-h-[46px]"
                 style={{ overflow: 'hidden' }}
               />
@@ -492,7 +545,7 @@ const IntakeConversation = ({ program, session: initialSession, user, onComplete
             <button
               type="button"
               onClick={handleSend}
-              disabled={!inputValue.trim() || isThinking || session.isComplete}
+              disabled={!inputValue.trim() || isThinking || session.isComplete || readyToAutoComplete}
               className="w-11 h-11 rounded-2xl bg-[#093a96] text-white flex items-center justify-center flex-shrink-0 disabled:opacity-40 hover:bg-blue-700 active:scale-95 transition-all cursor-pointer shadow-md shadow-blue-900/20"
             >
               <Send className="w-4 h-4" />
@@ -513,14 +566,8 @@ const IntakeConversation = ({ program, session: initialSession, user, onComplete
 // =============================================================================
 // PHASE 3 — FORM REVIEW + PRINT
 // =============================================================================
-const FormReview = ({ program, session, user, onBack, onSave, isSaving }) => {
-  const [editableFields, setEditableFields] = useState(() => {
-    const map = {};
-    session.template.fields.forEach((f) => {
-      map[f.id] = session.filledFields[f.id]?.value || '';
-    });
-    return map;
-  });
+const FormReview = ({ program, session, user, onBack, onSave, isSaving, onReviewInVault, autoSaved, returnOpportunity, onBackToOpportunity }) => {
+  const [editableFields, setEditableFields] = useState(() => buildEditableFieldsFromSession(session));
   const [editingId, setEditingId] = useState(null);
   const stats = getSessionStats(session);
 
@@ -574,10 +621,25 @@ const FormReview = ({ program, session, user, onBack, onSave, isSaving }) => {
           <div className="flex items-center gap-2">
             <CheckCircle2 className="w-5 h-5 text-emerald-500" />
             <h2 className="text-base font-extrabold text-slate-900">Application Complete</h2>
+            {autoSaved && !isSaving && (
+              <span className="text-[10px] font-bold bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">
+                ✓ Auto-saved to Vault
+              </span>
+            )}
           </div>
           <p className="text-xs text-slate-500">{session.template.title}</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          {autoSaved && (
+            <button
+              type="button"
+              onClick={onReviewInVault}
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-blue-50 border border-blue-200 text-xs font-bold text-[#093a96] hover:bg-blue-100 transition-colors cursor-pointer"
+            >
+              <FolderOpen className="w-3.5 h-3.5" />
+              Review in Vault
+            </button>
+          )}
           <button
             type="button"
             onClick={() => onSave(editableFields)}
@@ -585,7 +647,7 @@ const FormReview = ({ program, session, user, onBack, onSave, isSaving }) => {
             className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-50 border border-emerald-200 text-xs font-bold text-emerald-700 hover:bg-emerald-100 transition-colors cursor-pointer disabled:opacity-50"
           >
             {isSaving ? <RefreshCw className="w-3.5 h-3.5 animate-spin text-emerald-600" /> : <Save className="w-3.5 h-3.5 text-emerald-600" />}
-            {isSaving ? 'Saving...' : 'Save'}
+            {isSaving ? 'Saving...' : autoSaved ? 'Save Changes' : 'Save'}
           </button>
           <button
             type="button"
@@ -740,6 +802,18 @@ const FormReview = ({ program, session, user, onBack, onSave, isSaving }) => {
               unofficial fixer desks. Submit only at official agency offices or <code>.gov.ph</code> portals.
             </p>
           </div>
+
+          {/* Continue the approval checklist back where this form was requested from */}
+          {returnOpportunity && (
+            <button
+              type="button"
+              onClick={onBackToOpportunity}
+              className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-2xl bg-white border border-slate-200 hover:border-[#093a96] text-[#093a96] text-xs font-bold transition-all cursor-pointer shadow-2xs"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span>Back to {returnOpportunity.title}</span>
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -771,34 +845,102 @@ const PrintStyle = () => (
 // MAIN COMPONENT
 // =============================================================================
 export const ApplicationIntakeAgent = ({ preselectedBenefitId = null }) => {
-  const { user, documents, addToast, uploadNewDocument, updateDocument, setActiveTab, setActiveDocumentForPreview } = useApp();
+  const {
+    user,
+    documents,
+    addToast,
+    uploadNewDocument,
+    updateDocument,
+    setActiveTab,
+    setActiveDocumentForPreview,
+    setSelectedOpportunity,
+    pendingApplyRequest,
+    setPendingApplyRequest,
+  } = useApp();
   const [phase, setPhase] = useState('select'); // 'select' | 'intake' | 'review'
   const [selectedProgram, setSelectedProgram] = useState(null);
   const [session, setSession] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [autoSaved, setAutoSaved] = useState(false);
+  const [savedDocument, setSavedDocument] = useState(null);
+  // Where "Back to Opportunity" should return the citizen to, when this session was
+  // launched from a requirement's "Check / Fill Out Form" action rather than picked
+  // freely from the program list.
+  const [returnOpportunity, setReturnOpportunity] = useState(null);
 
   const handleProgramSelect = (program) => {
     const newSession = buildIntakeSession(program.id, user, documents);
     setSelectedProgram(program);
     setSession(newSession);
+    setAutoSaved(false);
+    setSavedDocument(null);
     setPhase('intake');
   };
 
-  const handleIntakeComplete = (completedSession) => {
-    setSession(completedSession);
+  // A citizen who already confirmed the form was answerable from the opportunity
+  // checklist (via the "Review & Edit First" choice) lands straight on the review
+  // screen with everything pre-filled, but nothing is saved until they explicitly do
+  // so — unlike Auto-Complete, which trusts the saved details and uploads immediately.
+  const handleGoToReviewUnsaved = (readySession, program) => {
+    setSelectedProgram(program);
+    setSession(readySession);
+    setAutoSaved(false);
+    setSavedDocument(null);
     setPhase('review');
   };
 
-  const handleSave = async (editableFields) => {
-    if (!selectedProgram || !session) return;
+  // Consume a pending request from an opportunity's requirements checklist: which
+  // program to open and whether to jump straight to auto-complete/review instead of
+  // the normal conversational fill-out.
+  useEffect(() => {
+    if (!pendingApplyRequest?.benefitId) return;
+    const program = INTAKE_PROGRAMS.find((p) => p.id === pendingApplyRequest.benefitId);
+    if (!program) {
+      setPendingApplyRequest(null);
+      return;
+    }
+
+    setReturnOpportunity(pendingApplyRequest.returnOpportunity || null);
+    const newSession = buildIntakeSession(program.id, user, documents);
+
+    if (pendingApplyRequest.action === 'auto-complete') {
+      setSelectedProgram(program);
+      handleIntakeComplete(newSession);
+    } else if (pendingApplyRequest.action === 'review') {
+      handleGoToReviewUnsaved(newSession, program);
+    } else {
+      handleProgramSelect(program);
+    }
+
+    setPendingApplyRequest(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingApplyRequest]);
+
+  // Completing the interview (whether via conversation or the Auto-Complete button)
+  // immediately uploads the filled form to the vault — the citizen lands on a form
+  // that's already saved, with a Review button to go check it, rather than having to
+  // remember to click Save themselves.
+  const handleIntakeComplete = async (completedSession) => {
+    setSession(completedSession);
+    setPhase('review');
+    await handleSave(buildEditableFieldsFromSession(completedSession), {
+      silent: true,
+      sessionOverride: completedSession,
+    });
+    setAutoSaved(true);
+  };
+
+  const handleSave = async (editableFields, { silent = false, sessionOverride = null } = {}) => {
+    const activeSession = sessionOverride || session;
+    if (!selectedProgram || !activeSession) return;
     setIsSaving(true);
     try {
       const docName = `${selectedProgram.shortTitle || selectedProgram.title} Application Form`;
-      const docId = session.documentId || `doc_app_${selectedProgram.id}_${Date.now()}`;
+      const docId = activeSession.documentId || `doc_app_${selectedProgram.id}_${Date.now()}`;
 
       // Check if this application document already exists in vault
       const existingDoc = documents.find(
-        (d) => d.id === session.documentId || (d.programId === selectedProgram.id && d.isApplicationForm)
+        (d) => d.id === activeSession.documentId || (d.programId === selectedProgram.id && d.isApplicationForm)
       );
 
       const docPayload = {
@@ -819,15 +961,15 @@ export const ApplicationIntakeAgent = ({ preselectedBenefitId = null }) => {
         programTitle: selectedProgram.title,
         programIcon: selectedProgram.icon,
         programAgency: selectedProgram.agency,
-        template: session.template,
+        template: activeSession.template,
         applicationData: editableFields,
         attributes: editableFields,
         filledFields: Object.fromEntries(
-          (session.template?.fields || []).map((f) => [
+          (activeSession.template?.fields || []).map((f) => [
             f.id,
             {
               value: editableFields[f.id] || '',
-              source: session.filledFields[f.id]?.source || 'conversation',
+              source: activeSession.filledFields[f.id]?.source || 'conversation',
             },
           ])
         ),
@@ -846,13 +988,23 @@ export const ApplicationIntakeAgent = ({ preselectedBenefitId = null }) => {
         ...prev,
         documentId: docPayload.id,
       }));
+      setSavedDocument(docPayload);
 
-      addToast(
-        'Application Saved',
-        `Saved "${docName}" to your Documents vault. You can view or edit it anytime from the Documents tab.`,
-        'success',
-        6000
-      );
+      if (!silent) {
+        addToast(
+          'Application Saved',
+          `Saved "${docName}" to your Documents vault. You can view or edit it anytime from the Documents tab.`,
+          'success',
+          6000
+        );
+      } else {
+        addToast(
+          '📤 Auto-Uploaded to Vault',
+          `Your ${docName} was automatically saved. Tap Review in Vault to check it, or edit fields below first.`,
+          'success',
+          6000
+        );
+      }
     } catch {
       addToast('Could not save application', 'Please try again.', 'error');
     } finally {
@@ -860,10 +1012,24 @@ export const ApplicationIntakeAgent = ({ preselectedBenefitId = null }) => {
     }
   };
 
+  const handleReviewInVault = () => {
+    if (savedDocument) setActiveDocumentForPreview(savedDocument);
+    setActiveTab('documents');
+  };
+
+  const handleBackToOpportunity = () => {
+    if (returnOpportunity) setSelectedOpportunity(returnOpportunity);
+    setActiveTab('explore');
+    setReturnOpportunity(null);
+  };
+
   const handleBackToSelect = () => {
     setPhase('select');
     setSelectedProgram(null);
     setSession(null);
+    setAutoSaved(false);
+    setSavedDocument(null);
+    setReturnOpportunity(null);
   };
 
   const handleBackToIntake = () => {
@@ -896,6 +1062,10 @@ export const ApplicationIntakeAgent = ({ preselectedBenefitId = null }) => {
           onBack={handleBackToIntake}
           onSave={handleSave}
           isSaving={isSaving}
+          onReviewInVault={handleReviewInVault}
+          autoSaved={autoSaved}
+          returnOpportunity={returnOpportunity}
+          onBackToOpportunity={handleBackToOpportunity}
         />
       )}
     </div>

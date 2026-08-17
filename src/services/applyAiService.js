@@ -73,6 +73,21 @@ export const INTAKE_PROGRAMS = [
     profileFieldsUsed: ['Full Name', 'Birthday', 'Address', 'Civil Status'],
     gapFieldsCount: 4,
   },
+  {
+    id: 'philhealth-senior',
+    title: 'PhilHealth Senior Citizen Mandatory Benefit Package',
+    shortTitle: 'PhilHealth Senior',
+    agency: 'Philippine Health Insurance Corporation',
+    color: '#be123c',
+    gradient: 'from-rose-700 to-pink-500',
+    icon: '👴',
+    tagline: 'Lifetime healthcare coverage & zero-balance billing for seniors 60+',
+    benefit: '100% Lifetime PhilHealth Coverage (RA 10645)',
+    officialUrl: 'https://www.philhealth.gov.ph',
+    estimatedMinutes: 2,
+    profileFieldsUsed: ['Full Name', 'Birthday', 'Address'],
+    gapFieldsCount: 5,
+  },
 ];
 
 // =============================================================================
@@ -431,7 +446,140 @@ export const INTAKE_FORM_TEMPLATES = {
       'Submit to your local Public Employment Service Office (PESO) in your Municipal/City Hall or through your Barangay Coordinator.',
     ],
   },
+
+  'philhealth-senior': {
+    title: 'PhilHealth Senior Citizen Mandatory Coverage Registration (RA 10645)',
+    agency: 'Philippine Health Insurance Corporation (PhilHealth)',
+    fields: [
+      {
+        id: 'fullName',
+        label: 'Senior Citizen Full Name',
+        section: 'Member Information',
+        source: 'profile',
+        profileKey: 'name',
+        format: (u) => u.name || `${u.firstName || ''} ${u.lastName || ''}`.trim() || 'Adones Santos',
+      },
+      {
+        id: 'dateOfBirth',
+        label: 'Date of Birth',
+        section: 'Member Information',
+        source: 'profile',
+        profileKey: 'birthDate',
+        format: (u) => u.birthDate || u.birth_date || '1962-03-10',
+      },
+      {
+        id: 'residentialAddress',
+        label: 'Residential Address',
+        section: 'Member Information',
+        source: 'profile',
+        profileKey: 'address',
+        format: (u) => u.address || 'Metro Manila, Philippines',
+      },
+      {
+        id: 'oscaOrPhilsysId',
+        label: 'OSCA Senior Citizen ID / PhilSys National ID No.',
+        section: 'Member Information',
+        source: 'documents',
+        docMatcher: (docs) =>
+          docs.find((d) =>
+            d.type?.toLowerCase().includes('national id') ||
+            d.name?.toLowerCase().includes('osca') ||
+            d.name?.toLowerCase().includes('philsys')
+          )?.documentNumber || null,
+        question: "What is your OSCA Senior Citizen ID number or PhilSys National ID (CRN)?",
+        hint: "e.g. OSCA-QC-2026-05512",
+        validator: (v) => String(v).trim().length >= 5,
+        validationHint: "Please provide a valid ID number",
+      },
+      {
+        id: 'philhealthPin',
+        label: 'PhilHealth Identification Number (PIN)',
+        section: 'Member Information',
+        source: 'documents',
+        docMatcher: (docs) =>
+          docs.find((d) =>
+            d.type?.toLowerCase().includes('philhealth') ||
+            d.name?.toLowerCase().includes('philhealth') ||
+            d.name?.toLowerCase().includes('mdr')
+          )?.documentNumber || null,
+        question: "What is your 12-digit PhilHealth Identification Number (PIN)? If you don't have one yet, type \"none\" and we'll flag this as a first-time registration.",
+        hint: "Format: XX-XXXXXXXXX-X, or \"none\"",
+        validator: (v) => v.toLowerCase().includes('none') || /\d{9,12}/.test(v.replace(/\D/g, '')),
+        validationHint: 'Enter your PIN or type "none" if not yet registered',
+      },
+      {
+        id: 'memberCategory',
+        label: 'Registering As',
+        section: 'Coverage Details',
+        source: 'ask',
+        question: "Are you registering as the **Principal Member** (a senior citizen who is a PhilHealth member yourself), or as a **Qualified Dependent** under a family member's PhilHealth record?",
+        hint: "Principal Member or Qualified Dependent",
+        options: ['Principal Member', 'Qualified Dependent'],
+      },
+      {
+        id: 'barangayResidency',
+        label: 'Barangay Certificate of Residency',
+        section: 'Supporting Documents',
+        source: 'documents',
+        docMatcher: (docs) => {
+          const d = docs.find((doc) =>
+            doc.type?.toLowerCase().includes('barangay') ||
+            doc.name?.toLowerCase().includes('residen')
+          );
+          return d ? `Verified in Vault (${d.documentNumber || 'Barangay Seal'})` : null;
+        },
+        question: "Do you have a Barangay Certificate of Residency on hand?",
+        hint: "Yes or No",
+      },
+      {
+        id: 'pmrfStatus',
+        label: 'PMRF Online Update Status',
+        section: 'Coverage Details',
+        source: 'ask',
+        question: "Have you already updated your PhilHealth Member Registration Form (PMRF) online to confirm your senior dependent status?",
+        hint: "Yes, No, or Not Sure",
+        options: ['Yes', 'No', 'Not Sure'],
+      },
+    ],
+    submissionGuide: [
+      'Print this completed PhilHealth Senior Citizen Coverage form.',
+      'Present it together with your OSCA Senior Citizen ID or PhilSys National ID at any PhilHealth Local Health Insurance Office (LHIO) or accredited hospital PhilHealth desk.',
+      "If registering as a Qualified Dependent, bring the Principal Member's PhilHealth MDR and your PSA Birth Certificate or Marriage Certificate as proof of relationship.",
+      'Coverage is automatic and premium-free under RA 10645 — no payment is required at any step.',
+    ],
+  },
 };
+
+/**
+ * Maps a government opportunity/benefit to the intake program whose form actually
+ * matches it. Order matters: more specific matches (e.g. senior-citizen PhilHealth
+ * coverage) must be checked before their broader siblings (e.g. generic PhilHealth
+ * hospital claims), or a citizen applying for one program would silently get handed
+ * the wrong form.
+ */
+export function resolveIntakeProgramId(opp) {
+  const oppTitle = (opp?.title || '').toLowerCase();
+  const oppAgency = (opp?.agency || '').toLowerCase();
+  const oppDesc = ((opp?.shortDesc || '') + ' ' + (opp?.fullDesc || '')).toLowerCase();
+  const combined = `${oppTitle} ${oppAgency} ${oppDesc}`;
+
+  if (combined.includes('sss') && (combined.includes('loan') || combined.includes('salary'))) {
+    return 'sss-salary-loan';
+  }
+  if (combined.includes('dswd') || combined.includes('aics') || combined.includes('crisis')) {
+    return 'dswd-aics';
+  }
+  if (combined.includes('philhealth') && (combined.includes('senior') || combined.includes('60'))) {
+    return 'philhealth-senior';
+  }
+  if (combined.includes('philhealth') || combined.includes('cf1') || combined.includes('claims')) {
+    return 'philhealth-cf1';
+  }
+  if (combined.includes('tupad') || combined.includes('dole') || combined.includes('employment')) {
+    return 'dole-tupad';
+  }
+  return null;
+}
 
 // =============================================================================
 // 3. SESSION BUILDER & GAP ANALYZER

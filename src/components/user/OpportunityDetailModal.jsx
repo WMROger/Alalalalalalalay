@@ -32,7 +32,14 @@ import { useApp } from '../../context/AppContext';
 import { IOSButton } from '../common/IOSButton';
 import { askAlalayAI } from '../../services/geminiService';
 import { matchOpportunityForCitizen, matchRequirementWithUserDoc } from '../../services/rulesEngine';
+import { resolveIntakeProgramId, buildIntakeSession, getActiveGapFields } from '../../services/applyAiService';
 import logoImg from '../../assets/AIlogos.png';
+
+// A requirement counts as "the application form itself" (as opposed to a supporting ID
+// or certificate) when its wording matches these patterns — that's the one item ALALAY
+// can actually fill out on the citizen's behalf, rather than something they must upload.
+const isApplicationFormRequirement = (name = '') =>
+  /application form|filled out|official.*(government )?form|registration form/i.test(name);
 
 import { AiMessageRenderer } from '../common/AiMessageRenderer';
 
@@ -58,6 +65,7 @@ export const OpportunityDetailModal = () => {
     setLoadedChatSession,
     addToast,
     openUploadForRequirement,
+    setPendingApplyRequest,
   } = useApp();
 
   // Side AI Chat State
@@ -68,8 +76,34 @@ export const OpportunityDetailModal = () => {
   const [sideSessionId, setSideSessionId] = useState('');
   const sideMessagesEndRef = useRef(null);
 
+  // Which requirement's "check my form" note is currently expanded, and what it found.
+  const [formCheckResult, setFormCheckResult] = useState(null);
+
   const opp = selectedOpportunity;
   const matchedOpp = useMemo(() => matchOpportunityForCitizen(opp, user, documents), [opp, user, documents]);
+  const intakeProgramId = useMemo(() => resolveIntakeProgramId(opp), [opp]);
+
+  const handleCheckApplicationForm = (requirementIdx) => {
+    if (!intakeProgramId) return;
+    const session = buildIntakeSession(intakeProgramId, user, documents);
+    const gaps = getActiveGapFields(session);
+    setFormCheckResult({ requirementIdx, programId: intakeProgramId, gapCount: gaps.length });
+  };
+
+  const handleGoToApplyTab = (action) => {
+    setPendingApplyRequest({
+      benefitId: intakeProgramId,
+      action,
+      returnOpportunity: opp,
+    });
+    setSelectedOpportunity(null);
+    setActiveTab('apply');
+  };
+
+  // Reset the form-check note whenever a different opportunity is opened.
+  useEffect(() => {
+    setFormCheckResult(null);
+  }, [opp?.id]);
 
   // Load previous archived chat for this specific opportunity if it exists, otherwise initialize greeting
   useEffect(() => {
@@ -482,11 +516,14 @@ export const OpportunityDetailModal = () => {
                   const matchedDoc = matchRequirementWithUserDoc(reqText, documents, user);
                   const isChecked = !!matchedDoc;
 
+                  const isFormRequirement = isApplicationFormRequirement(reqText) && Boolean(intakeProgramId);
+                  const checkResult = formCheckResult?.requirementIdx === idx ? formCheckResult : null;
+
                   return (
                     <div
                       key={idx}
                       onClick={() => {
-                        if (!isChecked && openUploadForRequirement) openUploadForRequirement(reqText);
+                        if (!isChecked && !isFormRequirement && openUploadForRequirement) openUploadForRequirement(reqText);
                       }}
                       className={`p-4 rounded-2xl border transition-all flex items-start justify-between gap-4 ${
                         isChecked
@@ -494,7 +531,7 @@ export const OpportunityDetailModal = () => {
                           : 'bg-white border-slate-200 hover:border-slate-300 cursor-pointer'
                       }`}
                     >
-                      <div className="flex items-start gap-3">
+                      <div className="flex items-start gap-3 flex-1 min-w-0">
                         <div
                           className={`w-5 h-5 rounded-lg flex items-center justify-center transition-all mt-0.5 flex-shrink-0 ${
                             isChecked
@@ -505,7 +542,7 @@ export const OpportunityDetailModal = () => {
                           {isChecked && <Check className="w-3.5 h-3.5 stroke-[3]" />}
                         </div>
 
-                        <div className="space-y-1">
+                        <div className="space-y-1 flex-1 min-w-0">
                           <span
                             className={`text-xs font-semibold leading-snug block ${
                               isChecked ? 'text-slate-900' : 'text-slate-700'
@@ -518,6 +555,74 @@ export const OpportunityDetailModal = () => {
                             <div className="flex items-center gap-1.5 text-[11px] font-bold text-emerald-700">
                               <BadgeCheck className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
                               <span>Auto-Verified in Locker: {matchedDoc.name}</span>
+                            </div>
+                          ) : isFormRequirement ? (
+                            <div className="space-y-2">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="text-[10px] text-slate-400 font-medium">
+                                  ALALAY can fill this out for you.
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleCheckApplicationForm(idx);
+                                  }}
+                                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-violet-50 hover:bg-violet-100 border border-violet-200 text-violet-700 text-[10px] font-bold transition-colors cursor-pointer"
+                                >
+                                  <Bot className="w-3 h-3" />
+                                  <span>Check / Fill Out Form</span>
+                                </button>
+                              </div>
+
+                              {checkResult && (
+                                <div onClick={(e) => e.stopPropagation()}>
+                                  {checkResult.gapCount === 0 ? (
+                                    <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 space-y-2">
+                                      <p className="text-[11px] font-bold text-emerald-800 flex items-start gap-1.5">
+                                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0 mt-0.5" />
+                                        <span>Good news — this form is already answerable with your saved profile and vault details!</span>
+                                      </p>
+                                      <div className="flex items-center gap-2 flex-wrap">
+                                        <button
+                                          type="button"
+                                          onClick={() => handleGoToApplyTab('auto-complete')}
+                                          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold transition-colors cursor-pointer"
+                                        >
+                                          <Sparkles className="w-3.5 h-3.5" />
+                                          <span>Auto-Complete with ALALAY</span>
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleGoToApplyTab('review')}
+                                          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-white border border-emerald-300 text-emerald-800 text-[11px] font-bold hover:bg-emerald-100 transition-colors cursor-pointer"
+                                        >
+                                          <FileText className="w-3.5 h-3.5" />
+                                          <span>Review &amp; Edit First</span>
+                                        </button>
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <div className="p-3 rounded-xl bg-blue-50 border border-blue-200 space-y-2">
+                                      <p className="text-[11px] font-bold text-[#093a96] flex items-start gap-1.5">
+                                        <HelpCircle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+                                        <span>
+                                          Needs {checkResult.gapCount} more detail{checkResult.gapCount > 1 ? 's' : ''} from you
+                                          — ALALAY already has the rest from your profile and vault.
+                                        </span>
+                                      </p>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleGoToApplyTab(null)}
+                                        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-[#093a96] hover:bg-blue-700 text-white text-[11px] font-bold transition-colors cursor-pointer"
+                                      >
+                                        <Bot className="w-3.5 h-3.5" />
+                                        <span>Fill Out with ALALAY</span>
+                                      </button>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
                             </div>
                           ) : (
                             <div className="flex items-center gap-2 flex-wrap">
@@ -572,41 +677,20 @@ export const OpportunityDetailModal = () => {
             )}
 
             {/* Apply with AI Agent — maps opportunity to intake program */}
-            {(() => {
-              const oppTitle = (opp?.title || '').toLowerCase();
-              const oppAgency = (opp?.agency || '').toLowerCase();
-              const oppDesc = ((opp?.shortDesc || '') + ' ' + (opp?.fullDesc || '')).toLowerCase();
-              const combined = oppTitle + ' ' + oppAgency + ' ' + oppDesc;
-
-              let benefitId = null;
-              if (combined.includes('sss') && (combined.includes('loan') || combined.includes('salary'))) {
-                benefitId = 'sss-salary-loan';
-              } else if (combined.includes('dswd') || combined.includes('aics') || combined.includes('crisis')) {
-                benefitId = 'dswd-aics';
-              } else if (combined.includes('philhealth') || combined.includes('cf1') || combined.includes('claims')) {
-                benefitId = 'philhealth-cf1';
-              } else if (combined.includes('tupad') || combined.includes('dole') || combined.includes('employment')) {
-                benefitId = 'dole-tupad';
-              }
-
-              if (!benefitId) return null;
-
-              return (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSelectedOpportunity(null);
-                    setActiveTab('apply');
-                    addToast('AI Agent Ready', `Starting application for ${opp.title}`, 'success');
-                  }}
-                  className="flex items-center justify-center gap-2 px-6 py-3.5 rounded-2xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white text-xs font-bold transition-all cursor-pointer shadow-md shadow-violet-900/20 active:scale-[0.98]"
-                >
-                  <Bot className="w-4 h-4" />
-                  <span>Apply with AI Agent</span>
-                  <ArrowRight className="w-3.5 h-3.5" />
-                </button>
-              );
-            })()}
+            {intakeProgramId && (
+              <button
+                type="button"
+                onClick={() => {
+                  handleGoToApplyTab(null);
+                  addToast('AI Agent Ready', `Starting application for ${opp.title}`, 'success');
+                }}
+                className="flex items-center justify-center gap-2 px-6 py-3.5 rounded-2xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white text-xs font-bold transition-all cursor-pointer shadow-md shadow-violet-900/20 active:scale-[0.98]"
+              >
+                <Bot className="w-4 h-4" />
+                <span>Apply with AI Agent</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </button>
+            )}
 
             <button
               type="button"
