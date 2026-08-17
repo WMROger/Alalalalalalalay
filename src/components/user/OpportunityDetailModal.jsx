@@ -552,10 +552,30 @@ export const OpportunityDetailModal = () => {
                           </span>
 
                           {matchedDoc ? (
-                            <div className="flex items-center gap-1.5 text-[11px] font-bold text-emerald-700">
-                              <BadgeCheck className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
-                              <span>Auto-Verified in Locker: {matchedDoc.name}</span>
-                            </div>
+                            matchedDoc.isApplicationForm ? (
+                              <div className="space-y-1.5">
+                                <div className="flex items-center gap-1.5 text-[11px] font-bold text-emerald-700">
+                                  <BadgeCheck className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
+                                  <span>Saved in Vault via ALALAY: {matchedDoc.name}</span>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleGoToApplyTab('review');
+                                  }}
+                                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-700 text-[10px] font-bold transition-colors cursor-pointer"
+                                >
+                                  <FileText className="w-3 h-3" />
+                                  <span>Review in Vault →</span>
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="flex items-center gap-1.5 text-[11px] font-bold text-emerald-700">
+                                <BadgeCheck className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
+                                <span>Auto-Verified in Locker: {matchedDoc.name}</span>
+                              </div>
+                            )
                           ) : isFormRequirement ? (
                             <div className="space-y-2">
                               <div className="flex items-center gap-2 flex-wrap">

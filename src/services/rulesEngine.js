@@ -110,6 +110,19 @@ export function matchRequirementWithUserDoc(reqName, userDocs = [], user = null)
   if (!reqName) return null;
   const q = reqName.toLowerCase().trim();
 
+  // ── Application Form: check vault first ─────────────────────────────────────
+  // When ALALAY auto-saves a completed intake form (isApplicationForm: true) to
+  // the vault, we treat that as fulfilling any "application form" requirement so
+  // the checklist in OpportunityDetailModal immediately shows it as "Ready ✓".
+  const isFormReq = /application form|filled out|official.*(government )?form|registration form/i.test(q);
+  if (isFormReq) {
+    const vaultForm = userDocs.find((d) => d.isApplicationForm === true);
+    if (vaultForm) return vaultForm;
+    // No vault form found — fall through so the modal still shows "Check / Fill Out Form"
+    return null;
+  }
+  // ────────────────────────────────────────────────────────────────────────────
+
   const hasWord = (str, regex) => regex.test(str);
 
   for (const doc of userDocs) {
