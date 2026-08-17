@@ -8,6 +8,8 @@ import {
   ShieldCheck,
   Check,
   ChevronRight,
+  Send,
+  Award,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { IOSCard } from '../common/IOSCard';
@@ -28,6 +30,8 @@ export const NotificationsView = () => {
     Sparkles,
     RefreshCw,
     ShieldCheck,
+    Send,
+    Award,
   };
 
   const handleNotificationAction = (notif) => {
@@ -37,6 +41,8 @@ export const NotificationsView = () => {
       setSelectedOpportunity(opportunities[0]);
     } else if (notif.type === 'source_updated') {
       setActiveTab('explore');
+    } else if (notif.type === 'application_submitted' || notif.type === 'application_approved') {
+      setActiveTab('benefits');
     }
   };
 

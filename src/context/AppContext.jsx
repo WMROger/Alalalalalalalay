@@ -387,6 +387,20 @@ export const AppProvider = ({ children }) => {
     return saved ? JSON.parse(saved) : NOTIFICATIONS;
   });
 
+  // Application submission trackers — one entry per submitted application
+  const [applicationTrackers, setApplicationTrackers] = useState(() => {
+    try {
+      const saved = localStorage.getItem('alalay_app_trackers');
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    localStorage.setItem('alalay_app_trackers', JSON.stringify(applicationTrackers));
+  }, [applicationTrackers]);
+
   const [auditLogs, setAuditLogs] = useState(() => {
     const saved = localStorage.getItem('alalay_audit_logs');
     return saved ? JSON.parse(saved) : AUDIT_LOGS;
@@ -477,6 +491,110 @@ export const AppProvider = ({ children }) => {
     setTimeout(() => {
       removeToast(id);
     }, duration);
+  };
+
+  // Bell Notification Manager
+  const addNotification = (notif) => {
+    const newNotif = {
+      id: `notif_live_${Date.now()}`,
+      read: false,
+      time: 'Just now',
+      ...notif,
+    };
+    setNotifications((prev) => {
+      const updated = [newNotif, ...prev];
+      localStorage.setItem('alalay_notifications', JSON.stringify(updated));
+      return updated;
+    });
+  };
+
+  const markAllNotificationsRead = () => {
+    setNotifications((prev) => {
+      const updated = prev.map((n) => ({ ...n, read: true }));
+      localStorage.setItem('alalay_notifications', JSON.stringify(updated));
+      return updated;
+    });
+  };
+
+  // Submit an application — creates a tracker entry and fires a bell notification
+  const submitApplication = (opp) => {
+    if (!opp) return;
+    const tracker = {
+      id: `tracker_${opp.id}_${Date.now()}`,
+      oppId: opp.id,
+      oppTitle: opp.title,
+      agency: opp.agency || 'Government Agency',
+      currentStep: 1, // 1=received, 2=reviewing, 3=approved
+      submittedAt: new Date().toISOString(),
+    };
+    setApplicationTrackers((prev) => {
+      // Replace any existing tracker for same opp
+      const filtered = prev.filter((t) => t.oppId !== opp.id);
+      return [tracker, ...filtered];
+    });
+    // Upsert into autoApplyQueue as 'applied' (works whether opp was queued before or not)
+    const now = new Date().toISOString();
+    setAutoApplyQueue((prev) => {
+      const exists = prev.find((e) => e.oppId === opp.id);
+      if (exists) {
+        return prev.map((e) =>
+          e.oppId === opp.id ? { ...e, status: 'applied', appliedAt: now } : e
+        );
+      }
+      return [{ oppId: opp.id, status: 'applied', appliedAt: now }, ...prev];
+    });
+
+    // Fire bell notification
+    addNotification({
+      type: 'application_submitted',
+      title: '📤 Application Sent!',
+      message: `Your application for "${opp.title}" has been submitted to ${opp.agency || 'the government agency'}. You can now track its progress in Benefits.`,
+      badgeColor: '#007AFF',
+      icon: 'Send',
+      actionText: 'Track Application',
+      oppId: opp.id,
+    });
+    addToast('Application Submitted', `Your application for ${opp.title} has been sent!`, 'success', 6000);
+  };
+
+  // Advance a tracker step (1→2→3). Fires notifications and marks acquired on step 3.
+  const advanceTrackerStep = (trackerId) => {
+    setApplicationTrackers((prev) => {
+      const updated = prev.map((t) => {
+        if (t.id !== trackerId) return t;
+        const nextStep = Math.min(t.currentStep + 1, 3);
+        if (nextStep === 2) {
+          addNotification({
+            type: 'application_submitted',
+            title: '🔍 Application Under Review',
+            message: `${t.agency} is now reviewing your application for "${t.oppTitle}". You'll be notified once a decision is made.`,
+            badgeColor: '#FF9500',
+            icon: 'RefreshCw',
+            actionText: 'Track Progress',
+            oppId: t.oppId,
+          });
+          addToast('Under Review', `${t.agency} is reviewing your application.`, 'info', 5000);
+        } else if (nextStep === 3) {
+          addNotification({
+            type: 'application_approved',
+            title: '🎉 Congratulations! Application Approved',
+            message: `You are now officially enrolled in "${t.oppTitle}"! Welcome — you are now part of this program. Visit the Benefits page to see your new benefit.`,
+            badgeColor: '#34C759',
+            icon: 'ShieldCheck',
+            actionText: 'View Benefit',
+            oppId: t.oppId,
+          });
+          addToast('🎉 Approved!', `You are now part of "${t.oppTitle}"!`, 'success', 8000);
+          // Mark as acquired in autoApplyQueue
+          markBenefitAcquired(t.oppId);
+          // Fire confetti
+          confetti({ particleCount: 160, spread: 80, origin: { y: 0.5 } });
+        }
+        return { ...t, currentStep: nextStep };
+      });
+      localStorage.setItem('alalay_app_trackers', JSON.stringify(updated));
+      return updated;
+    });
   };
 
   const removeToast = (id) => {
@@ -1859,6 +1977,11 @@ export const AppProvider = ({ children }) => {
         sources,
         reviewQueue,
         notifications,
+        addNotification,
+        markAllNotificationsRead,
+        applicationTrackers,
+        submitApplication,
+        advanceTrackerStep,
         auditLogs,
         unreadCount,
         // Chat Archives

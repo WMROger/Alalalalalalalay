@@ -27,6 +27,8 @@ import {
   Award,
   AlertCircle,
   UploadCloud,
+  Loader2,
+  PartyPopper,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { IOSButton } from '../common/IOSButton';
@@ -66,6 +68,7 @@ export const OpportunityDetailModal = () => {
     addToast,
     openUploadForRequirement,
     setPendingApplyRequest,
+    submitApplication,
   } = useApp();
 
   // Side AI Chat State
@@ -76,12 +79,30 @@ export const OpportunityDetailModal = () => {
   const [sideSessionId, setSideSessionId] = useState('');
   const sideMessagesEndRef = useRef(null);
 
+  // Submission overlay state: null | 'loading' | 'success'
+  const [submissionPhase, setSubmissionPhase] = useState(null);
+
   // Which requirement's "check my form" note is currently expanded, and what it found.
   const [formCheckResult, setFormCheckResult] = useState(null);
 
   const opp = selectedOpportunity;
   const matchedOpp = useMemo(() => matchOpportunityForCitizen(opp, user, documents), [opp, user, documents]);
   const intakeProgramId = useMemo(() => resolveIntakeProgramId(opp), [opp]);
+
+  // Handle application submission with loading simulation
+  const handleSubmitApplication = () => {
+    setSubmissionPhase('loading');
+    setTimeout(() => {
+      setSubmissionPhase('success');
+      submitApplication(opp);
+    }, 2000);
+  };
+
+  const handleGoToBenefitsTracker = () => {
+    setSubmissionPhase(null);
+    setSelectedOpportunity(null);
+    setActiveTab('benefits');
+  };
 
   const handleCheckApplicationForm = (requirementIdx) => {
     if (!intakeProgramId) return;
@@ -162,6 +183,12 @@ export const OpportunityDetailModal = () => {
           { name: 'Filled out Official Government Application Form', status: 'action_required' },
           { name: 'Proof of Residence / Certificate of Indigency (if applicable)', status: 'action_required' },
         ];
+
+  // All requirements are met when every item has a matching vault document
+  const allRequirementsMet = requirementsList.every((req) => {
+    const reqText = typeof req === 'string' ? req : req.name;
+    return !!matchRequirementWithUserDoc(reqText, documents, user);
+  });
 
   // Dynamic benefits list
   const benefitsList =
@@ -271,6 +298,61 @@ export const OpportunityDetailModal = () => {
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 select-none transition-opacity duration-300">
+
+      {/* ===== SUBMISSION OVERLAY ===== */}
+      {submissionPhase && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-md">
+          {submissionPhase === 'loading' && (
+            <div className="bg-white rounded-3xl p-10 flex flex-col items-center gap-5 shadow-2xl max-w-sm w-full mx-4 animate-modal-in">
+              <div className="w-20 h-20 rounded-full bg-blue-50 flex items-center justify-center">
+                <Loader2 className="w-10 h-10 text-[#093a96] animate-spin" />
+              </div>
+              <div className="text-center space-y-1.5">
+                <h2 className="text-lg font-black text-slate-900">Submitting Application…</h2>
+                <p className="text-sm text-slate-500">Securely sending your documents to {opp.agency || 'the government agency'}.</p>
+              </div>
+              <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
+                <div className="h-full bg-[#093a96] rounded-full animate-[progress_2s_ease-in-out_forwards]" style={{width: '100%', animation: 'progress 2s ease-in-out forwards'}} />
+              </div>
+              <style>{`@keyframes progress { from { width: 0% } to { width: 100% } }`}</style>
+            </div>
+          )}
+
+          {submissionPhase === 'success' && (
+            <div className="bg-white rounded-3xl p-10 flex flex-col items-center gap-5 shadow-2xl max-w-sm w-full mx-4 animate-modal-in">
+              <div className="w-24 h-24 rounded-full bg-emerald-50 border-4 border-emerald-200 flex items-center justify-center animate-[pop_0.4s_cubic-bezier(0.175,0.885,0.32,1.275)]">
+                <CheckCircle2 className="w-12 h-12 text-emerald-500" />
+              </div>
+              <div className="text-center space-y-2">
+                <h2 className="text-xl font-black text-slate-900">Application Submitted!</h2>
+                <p className="text-sm text-slate-600 leading-relaxed">
+                  Your application for <strong className="text-[#093a96]">{opp.title}</strong> has been sent to {opp.agency || 'the government agency'}.
+                </p>
+                <p className="text-xs text-slate-400">Check your notification bell for updates.</p>
+              </div>
+              <div className="flex flex-col w-full gap-2">
+                <button
+                  type="button"
+                  onClick={handleGoToBenefitsTracker}
+                  className="w-full py-3 rounded-2xl bg-[#093a96] hover:bg-[#072d75] text-white font-bold text-sm flex items-center justify-center gap-2 transition-all cursor-pointer"
+                >
+                  <Award className="w-4 h-4" />
+                  Track My Application →
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setSubmissionPhase(null); setSelectedOpportunity(null); }}
+                  className="w-full py-2.5 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-600 font-semibold text-sm transition-all cursor-pointer"
+                >
+                  Close
+                </button>
+              </div>
+              <style>{`@keyframes pop { 0% { transform: scale(0); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }`}</style>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Dynamic 3 : 1 Container */}
       <div
         className={`w-full transition-all duration-400 ease-[cubic-bezier(0.16,1,0.3,1)] my-auto flex flex-col lg:flex-row items-stretch gap-5 ${
@@ -697,7 +779,7 @@ export const OpportunityDetailModal = () => {
             )}
 
             {/* Apply with AI Agent — maps opportunity to intake program */}
-            {intakeProgramId && (
+            {intakeProgramId && !allRequirementsMet && (
               <button
                 type="button"
                 onClick={() => {
@@ -708,6 +790,19 @@ export const OpportunityDetailModal = () => {
               >
                 <Bot className="w-4 h-4" />
                 <span>Apply with AI Agent</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </button>
+            )}
+
+            {/* Submit Application — appears only when ALL requirements are met */}
+            {allRequirementsMet && (
+              <button
+                type="button"
+                onClick={handleSubmitApplication}
+                className="flex items-center justify-center gap-2 px-6 py-3.5 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white text-xs font-bold transition-all cursor-pointer shadow-md shadow-emerald-900/20 active:scale-[0.98] animate-[pulse-border_2s_ease-in-out_infinite]"
+              >
+                <Send className="w-4 h-4" />
+                <span>Submit Application</span>
                 <ArrowRight className="w-3.5 h-3.5" />
               </button>
             )}

@@ -1,8 +1,255 @@
-import React, { useMemo, useState } from 'react';
-import { Award, History, CheckCircle2, X, ChevronDown, Gift } from 'lucide-react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
+import {
+  Award,
+  History,
+  CheckCircle2,
+  X,
+  ChevronDown,
+  Gift,
+  Send,
+  RefreshCw,
+  Play,
+  Clock,
+  Building,
+  ChevronRight,
+  Sparkles,
+  ShieldCheck,
+  Loader2,
+} from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { rankAndFilterOpportunities } from '../../services/rulesEngine';
 
+// ─────────────────────────────────────────────────────────────────────────────
+// STEP CONFIG
+// ─────────────────────────────────────────────────────────────────────────────
+const TRACKER_STEPS = [
+  {
+    step: 1,
+    label: 'Application Received',
+    desc: 'Your application package was successfully received by the agency system.',
+    icon: Send,
+    color: 'text-blue-600',
+    bg: 'bg-blue-50',
+    border: 'border-blue-200',
+    activeBg: 'bg-[#093a96]',
+    activeText: 'text-white',
+  },
+  {
+    step: 2,
+    label: 'Agency Review',
+    desc: 'The assigned government officer is reviewing your submitted documents.',
+    icon: RefreshCw,
+    color: 'text-amber-600',
+    bg: 'bg-amber-50',
+    border: 'border-amber-200',
+    activeBg: 'bg-amber-500',
+    activeText: 'text-white',
+  },
+  {
+    step: 3,
+    label: 'Approved ✓',
+    desc: 'Your application has been approved. You are now part of this program!',
+    icon: ShieldCheck,
+    color: 'text-emerald-600',
+    bg: 'bg-emerald-50',
+    border: 'border-emerald-200',
+    activeBg: 'bg-emerald-500',
+    activeText: 'text-white',
+  },
+];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TRACKER CARD
+// ─────────────────────────────────────────────────────────────────────────────
+const TrackerCard = ({ tracker, onAdvance }) => {
+  const [simRunning, setSimRunning] = useState(false);
+  const [countdown, setCountdown] = useState(null);
+  const timerRef = useRef(null);
+  const countdownRef = useRef(null);
+
+  const isDone = tracker.currentStep >= 3;
+
+  const startSimulation = () => {
+    if (simRunning || isDone) return;
+    setSimRunning(true);
+
+    // Countdown display
+    let secs = 10;
+    setCountdown(secs);
+    countdownRef.current = setInterval(() => {
+      secs -= 1;
+      setCountdown(secs);
+      if (secs <= 0) {
+        clearInterval(countdownRef.current);
+        setCountdown(null);
+      }
+    }, 1000);
+
+    // Advance step after 10s
+    timerRef.current = setTimeout(() => {
+      onAdvance(tracker.id);
+      setSimRunning(false);
+    }, 10000);
+  };
+
+  // Clean up on unmount
+  useEffect(() => {
+    return () => {
+      clearTimeout(timerRef.current);
+      clearInterval(countdownRef.current);
+    };
+  }, []);
+
+  // If step advances during simulation (step 2 → 3), auto-start next 10s
+  const prevStep = useRef(tracker.currentStep);
+  useEffect(() => {
+    if (prevStep.current !== tracker.currentStep) {
+      prevStep.current = tracker.currentStep;
+      setSimRunning(false);
+      clearTimeout(timerRef.current);
+      clearInterval(countdownRef.current);
+      setCountdown(null);
+
+      // If step was just advanced to 2, auto-start next phase
+      if (tracker.currentStep === 2 && !isDone) {
+        setTimeout(() => startSimulation(), 600);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tracker.currentStep]);
+
+  const submittedDate = tracker.submittedAt
+    ? new Date(tracker.submittedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+    : 'recently';
+
+  return (
+    <div className={`rounded-3xl border overflow-hidden shadow-sm transition-all ${isDone ? 'border-emerald-200 bg-emerald-50/30' : 'border-slate-200 bg-white'}`}>
+      {/* Card Header */}
+      <div className="p-5 sm:p-6 flex items-start justify-between gap-4 flex-wrap">
+        <div className="space-y-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            {isDone ? (
+              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-100 border border-emerald-200 text-emerald-700 text-[10px] font-bold">
+                <CheckCircle2 className="w-3 h-3" />
+                Approved
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-blue-100 border border-blue-200 text-[#093a96] text-[10px] font-bold">
+                <Loader2 className="w-3 h-3 animate-spin" />
+                Processing
+              </span>
+            )}
+            <span className="text-[10px] text-slate-400 font-medium">Submitted {submittedDate}</span>
+          </div>
+          <h3 className="text-sm font-extrabold text-slate-900 leading-snug">{tracker.oppTitle}</h3>
+          <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
+            <Building className="w-3 h-3" />
+            <span>{tracker.agency}</span>
+          </div>
+        </div>
+
+        {/* Start / Running state */}
+        {!isDone && (
+          <div className="flex-shrink-0">
+            {simRunning ? (
+              <div className="flex flex-col items-center gap-1">
+                <div className="w-10 h-10 rounded-full border-2 border-amber-400 flex items-center justify-center bg-amber-50">
+                  <span className="text-xs font-black text-amber-600">{countdown ?? '…'}</span>
+                </div>
+                <span className="text-[9px] text-slate-400 font-medium">sec</span>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={startSimulation}
+                className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#093a96] hover:bg-[#072d75] text-white text-xs font-bold transition-all cursor-pointer shadow-sm active:scale-95"
+              >
+                <Play className="w-3.5 h-3.5 fill-white" />
+                <span>Start</span>
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Progress Stepper */}
+      <div className="px-5 sm:px-6 pb-5 sm:pb-6">
+        <div className="relative">
+          {/* Connector line */}
+          <div className="absolute top-5 left-5 right-5 h-0.5 bg-slate-100 z-0" />
+          <div
+            className="absolute top-5 left-5 h-0.5 bg-gradient-to-r from-[#093a96] to-emerald-500 z-0 transition-all duration-700"
+            style={{ width: `${((tracker.currentStep - 1) / 2) * 100}%` }}
+          />
+
+          {/* Steps */}
+          <div className="relative z-10 grid grid-cols-3 gap-2">
+            {TRACKER_STEPS.map((s) => {
+              const isActive = tracker.currentStep === s.step;
+              const isDoneStep = tracker.currentStep > s.step;
+              const StepIcon = s.icon;
+
+              return (
+                <div key={s.step} className="flex flex-col items-center gap-2 text-center">
+                  <div
+                    className={`w-10 h-10 rounded-full border-2 flex items-center justify-center transition-all duration-500 ${
+                      isDoneStep
+                        ? 'bg-emerald-500 border-emerald-500 text-white shadow-md'
+                        : isActive
+                        ? `${s.activeBg} border-transparent ${s.activeText} shadow-lg ${tracker.currentStep < 3 ? 'ring-4 ring-offset-1 ring-blue-200 animate-pulse' : ''}`
+                        : 'bg-white border-slate-200 text-slate-300'
+                    }`}
+                  >
+                    {isDoneStep ? (
+                      <CheckCircle2 className="w-5 h-5" />
+                    ) : (
+                      <StepIcon className={`w-4 h-4 ${isActive && simRunning && s.step === 2 ? 'animate-spin' : ''}`} />
+                    )}
+                  </div>
+                  <div className="space-y-0.5">
+                    <p className={`text-[10px] font-bold leading-tight ${isActive || isDoneStep ? 'text-slate-900' : 'text-slate-400'}`}>
+                      {s.label}
+                    </p>
+                    {(isActive || isDoneStep) && (
+                      <p className="text-[9px] text-slate-500 leading-snug hidden sm:block max-w-[90px] mx-auto">
+                        {s.desc}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Active step description on mobile */}
+        {!isDone && (
+          <div className="mt-4 p-3 rounded-xl bg-slate-50 border border-slate-100 text-[11px] text-slate-600 leading-relaxed sm:hidden">
+            {TRACKER_STEPS.find((s) => s.step === tracker.currentStep)?.desc}
+          </div>
+        )}
+
+        {isDone && (
+          <div className="mt-4 p-4 rounded-2xl bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200 flex items-start gap-3">
+            <div className="w-8 h-8 rounded-full bg-emerald-500 flex items-center justify-center flex-shrink-0">
+              <Sparkles className="w-4 h-4 text-white" />
+            </div>
+            <div>
+              <p className="text-xs font-extrabold text-emerald-800">🎉 Congratulations!</p>
+              <p className="text-[11px] text-emerald-700 mt-0.5 leading-relaxed">
+                You are now officially part of <strong>{tracker.oppTitle}</strong>. Check the Benefits Received section below to see your new benefit.
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MAIN VIEW
+// ─────────────────────────────────────────────────────────────────────────────
 export const BenefitsView = () => {
   const {
     opportunities,
@@ -15,6 +262,8 @@ export const BenefitsView = () => {
     markBenefitAcquired,
     clearAutoApplyHistory,
     clearAcquiredBenefits,
+    applicationTrackers,
+    advanceTrackerStep,
     t,
   } = useApp();
 
@@ -25,7 +274,6 @@ export const BenefitsView = () => {
     [opportunities, user, documents]
   );
 
-  // Benefits the citizen has confirmed actually receiving.
   const acquiredEntries = useMemo(() => {
     return (autoApplyQueue || [])
       .filter((entry) => entry.status === 'acquired')
@@ -34,7 +282,6 @@ export const BenefitsView = () => {
       .sort((a, b) => new Date(b.acquiredAt || 0) - new Date(a.acquiredAt || 0));
   }, [autoApplyQueue, rankedOpportunities]);
 
-  // Benefits Auto-Apply has submitted on the citizen's behalf, not yet confirmed received.
   const appliedEntries = useMemo(() => {
     return (autoApplyQueue || [])
       .filter((entry) => entry.status === 'applied')
@@ -42,6 +289,9 @@ export const BenefitsView = () => {
       .filter((entry) => entry.opp)
       .sort((a, b) => new Date(b.appliedAt || 0) - new Date(a.appliedAt || 0));
   }, [autoApplyQueue, rankedOpportunities]);
+
+  // Only show trackers that are not yet fully done (step 3) — or keep all so user can see approved ones too
+  const activeTrackers = applicationTrackers || [];
 
   return (
     <div className="space-y-8 select-none max-w-6xl mx-auto pb-12">
@@ -54,7 +304,38 @@ export const BenefitsView = () => {
         </p>
       </div>
 
-      {/* Benefits You Have (Acquired / Received) */}
+      {/* ================================================================ */}
+      {/* APPLICATION TRACKER */}
+      {/* ================================================================ */}
+      {activeTrackers.length > 0 && (
+        <div className="space-y-4">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-xl bg-[#093a96]/10 text-[#093a96] flex items-center justify-center flex-shrink-0">
+              <Clock className="w-4 h-4" />
+            </div>
+            <div>
+              <h2 className="text-sm font-black text-slate-900">
+                Application Tracker ({activeTrackers.length})
+              </h2>
+              <p className="text-[11px] text-slate-500">Track the real-time processing status of your submitted applications.</p>
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            {activeTrackers.map((tracker) => (
+              <TrackerCard
+                key={tracker.id}
+                tracker={tracker}
+                onAdvance={advanceTrackerStep}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ================================================================ */}
+      {/* BENEFITS YOU HAVE (ACQUIRED) */}
+      {/* ================================================================ */}
       <div className="space-y-3">
         <div className="flex items-center gap-2">
           <div className="w-8 h-8 rounded-xl bg-amber-50 text-amber-700 flex items-center justify-center flex-shrink-0">
@@ -126,7 +407,9 @@ export const BenefitsView = () => {
         )}
       </div>
 
-      {/* Applied Benefits (submitted, awaiting confirmation) */}
+      {/* ================================================================ */}
+      {/* APPLIED BENEFITS (submitted, awaiting confirmation) */}
+      {/* ================================================================ */}
       <div className="rounded-2xl bg-white border border-slate-200/90 shadow-2xs overflow-hidden">
         <div className="w-full p-4 sm:p-5 flex items-center justify-between gap-3">
           <button
