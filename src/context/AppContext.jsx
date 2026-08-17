@@ -52,7 +52,7 @@ const AppContext = createContext();
 function guessDocumentTypeFromRequirement(requirementName = '') {
   const q = requirementName.toLowerCase();
   if (/philsys|national id|umid|valid id|government id|photo id/.test(q)) return 'National ID / Gov ID';
-  if (/barangay|indigency|residency|clearance of residence/.test(q)) return 'Barangay Certificate';
+  if (/proof of residence|utility bill|water bill|electricity bill|meralco|maynilad|manila water|barangay|indigency|residency|clearance of residence/.test(q)) return 'Proof of Residence / Utility Bill';
   if (/philhealth|pmrf|mdr/.test(q)) return 'PhilHealth MDR';
   if (/nbi/.test(q)) return 'NBI Clearance';
   if (/police clearance/.test(q)) return 'Police Clearance';
@@ -60,8 +60,11 @@ function guessDocumentTypeFromRequirement(requirementName = '') {
   if (/clinical abstract|medical certificate|statement of account|hospital bill|prescription/.test(q)) return 'Medical Certificate / Clinical Abstract';
   if (/certificate of employment|coe/.test(q)) return 'Certificate of Employment (COE)';
   if (/registration|matriculation|enrollment|transcript|cor/.test(q)) return 'School Registration / Transcript';
+  if (/pwd|disability/.test(q)) return 'PWD ID / Disability Certificate';
+  if (/senior citizen|osca/.test(q)) return 'Senior Citizen ID (OSCA)';
   return 'National ID / Gov ID';
 }
+
 
 // Collapses opportunities that share the same title (case/whitespace-insensitive) — e.g.
 // repeated scraping runs or admin re-adds can leave near-duplicate cards behind, sometimes

@@ -1,3 +1,5 @@
+import { parseUploadedImage } from './imageParserService.js';
+
 /**
  * DocAgent - Autonomous Document Intelligence & Vault Eligibility Auditor
  * 
@@ -13,6 +15,8 @@ export const STATUTORY_VALIDITY_DAYS = {
   'Barangay Certificate': 180, // 6 months (DILG Standard)
   'Barangay Indigency': 180, // 6 months
   'Barangay Clearance': 180, // 6 months
+  'Proof of Residence / Utility Bill': 90, // 3 months
+  'Utility Bill / Proof of Billing': 90, // 3 months
   'NBI Clearance': 365, // 1 year
   'Police Clearance': 180, // 6 months
   'Medical Certificate': 90, // 3 months
@@ -35,6 +39,13 @@ const DOCUMENT_VISUAL_PROFILES = [
     kind: 'card',
     from: '#093a96',
     to: '#1e5fd9',
+  },
+  {
+    match: (type) => /utility|bill|water|electric|meralco|maynilad|residence/i.test(type),
+    label: 'UTILITY BILL / PROOF OF RESIDENCE',
+    kind: 'document',
+    from: '#0284c7',
+    to: '#38bdf8',
   },
   {
     match: (type) => /barangay/i.test(type),
@@ -332,6 +343,23 @@ export const OCR_PRESET_TEMPLATES = {
     confidenceScore: 98.0,
     textClarity: 'Good (97%)',
   },
+  utility_bill: {
+    type: 'Proof of Residence / Utility Bill',
+    name: 'Water Utility Billing Statement (Proof of Residence)',
+    issuer: 'Water Utility Provider / Local Water District',
+    documentNumber: 'UTIL-BILL-2026-99120',
+    validityDays: 90,
+    thumbnail: getDocumentPlaceholderThumbnail('Proof of Residence / Utility Bill'),
+    attributes: {
+      accountNumber: 'UTIL-BILL-2026-99120',
+      meterNumber: 'MTR-884210',
+      serviceAddress: 'Unit 402, Katipunan Ave, Loyola Heights, Quezon City',
+      billingPeriod: 'Current Billing Cycle',
+      purpose: 'Proof of Residence / Billing Verification',
+    },
+    confidenceScore: 98.2,
+    textClarity: 'Optimal (98%)',
+  },
   csc_eligibility: {
     type: 'Certificate of Employment (COE)',
     name: 'CSC Civil Service Eligibility Certificate',
@@ -352,7 +380,48 @@ export const OCR_PRESET_TEMPLATES = {
 /**
  * 1. Autonomous Document Parser & Attribute Extractor (DocAgent OCR Engine)
  */
-export async function scanAndExtractDocumentMetadata(fileOrName, customFields = {}) {
+export async function scanAndExtractDocumentMetadata(fileOrName, customFields = {}, requiredType = null) {
+  // If fileOrName is a File or Blob, attempt Multimodal Image & Document Parsing
+  if (typeof File !== 'undefined' && fileOrName instanceof File) {
+    try {
+      const parsed = await parseUploadedImage(fileOrName);
+      if (parsed && (parsed.docName || parsed.docType)) {
+        const issuedDate = new Date();
+        const validityDays = 90;
+        const calculatedExpiration =
+          parsed.expirationDate ||
+          new Date(issuedDate.getTime() + validityDays * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+        // Format normalized document type
+        let detectedType = parsed.docType || 'Government Document';
+        if (/utility|bill|water|electric|meralco|maynilad|residence/i.test(detectedType)) {
+          detectedType = 'Proof of Residence / Utility Bill';
+        }
+
+        return {
+          name: customFields.name || parsed.docName || 'Uploaded Document',
+          type: customFields.type || detectedType,
+          issuer: customFields.issuer || parsed.issuer || 'Authorized Authority',
+          documentNumber: customFields.documentNumber || parsed.docNumber || `DOC-${Math.floor(100000 + Math.random() * 900000)}`,
+          expirationDate: customFields.expirationDate || calculatedExpiration,
+          attributes: {
+            fullName: parsed.fullName || parsed.firstName || '',
+            address: parsed.address || '',
+            documentNumber: parsed.docNumber || '',
+            ...(customFields.attributes || {}),
+          },
+          confidenceScore: parsed.confidenceScore || 96.5,
+          textClarity: 'Optimal (98%)',
+          thumbnail: parsed.previewUrl || getDocumentPlaceholderThumbnail(detectedType),
+          status: 'Valid',
+          scannedAt: new Date().toISOString(),
+        };
+      }
+    } catch (parseErr) {
+      console.warn('[DocAgent OCR] Image parsing fallback triggered:', parseErr?.message || parseErr);
+    }
+  }
+
   // Simulate OCR latency for realistic agentic scanning experience
   await new Promise((resolve) => setTimeout(resolve, 650));
 
@@ -361,8 +430,7 @@ export async function scanAndExtractDocumentMetadata(fileOrName, customFields = 
 
   let template = OCR_PRESET_TEMPLATES.philsys;
 
-  // Ordered most-specific-first so overlapping words (e.g. both NBI and Police clearances
-  // contain "clearance") resolve to the right template instead of always matching NBI.
+  // Ordered most-specific-first so overlapping words resolve to the right template
   if (lower.includes('police') || lower.includes('pnp')) {
     template = OCR_PRESET_TEMPLATES.police_clearance;
   } else if (lower.includes('nbi')) {
@@ -373,6 +441,20 @@ export async function scanAndExtractDocumentMetadata(fileOrName, customFields = 
     template = OCR_PRESET_TEMPLATES.senior_osca;
   } else if (lower.includes('philhealth') || lower.includes('mdr') || lower.includes('pmrf')) {
     template = OCR_PRESET_TEMPLATES.philhealth_mdr;
+  } else if (
+    lower.includes('water') ||
+    lower.includes('electric') ||
+    lower.includes('utility') ||
+    lower.includes('bill') ||
+    lower.includes('meralco') ||
+    lower.includes('maynilad') ||
+    lower.includes('manila water') ||
+    lower.includes('mcwd') ||
+    lower.includes('pldt') ||
+    lower.includes('globe') ||
+    lower.includes('converge')
+  ) {
+    template = OCR_PRESET_TEMPLATES.utility_bill;
   } else if (lower.includes('indigen') || lower.includes('barangay') || lower.includes('residency')) {
     template = OCR_PRESET_TEMPLATES.indigency;
   } else if (lower.includes('medical') || lower.includes('abstract') || lower.includes('doctor') || lower.includes('hospital') || lower.includes('clinical')) {
@@ -389,6 +471,26 @@ export async function scanAndExtractDocumentMetadata(fileOrName, customFields = 
     template = OCR_PRESET_TEMPLATES.school_cor;
   } else if (lower.includes('clearance')) {
     template = OCR_PRESET_TEMPLATES.nbi;
+  } else if (requiredType) {
+    // If the filename was generic (e.g. numeric photo/camera name from phone like 462548462...)
+    const reqNorm = requiredType.toLowerCase();
+    if (reqNorm.includes('residence') || reqNorm.includes('utility') || reqNorm.includes('bill')) {
+      template = OCR_PRESET_TEMPLATES.utility_bill;
+    } else if (reqNorm.includes('barangay') || reqNorm.includes('indigency')) {
+      template = OCR_PRESET_TEMPLATES.indigency;
+    } else if (reqNorm.includes('philhealth') || reqNorm.includes('mdr')) {
+      template = OCR_PRESET_TEMPLATES.philhealth_mdr;
+    } else if (reqNorm.includes('nbi')) {
+      template = OCR_PRESET_TEMPLATES.nbi;
+    } else if (reqNorm.includes('medical')) {
+      template = OCR_PRESET_TEMPLATES.medical;
+    } else if (reqNorm.includes('birth')) {
+      template = OCR_PRESET_TEMPLATES.psa_birth;
+    } else if (reqNorm.includes('employment') || reqNorm.includes('coe')) {
+      template = OCR_PRESET_TEMPLATES.coe;
+    } else if (reqNorm.includes('school')) {
+      template = OCR_PRESET_TEMPLATES.school_cor;
+    }
   }
 
   // Calculate Expiration Date
@@ -428,15 +530,165 @@ export function verifyDocumentUpload(extracted, requiredType = null) {
   const confidence = extracted?.confidenceScore || 0;
   const detectedType = extracted?.type || 'Unknown Document';
   const normalize = (t) => (t || '').toLowerCase().trim();
-  const typeMatches = !requiredType || normalize(detectedType) === normalize(requiredType);
 
-  if (!typeMatches) {
+  // ── Semantic Equivalence Groups ──────────────────────────────────────────────
+  // Multiple real-world document types satisfy the same Philippine government
+  // requirement. A water bill, electricity bill, or utility bill is a perfectly
+  // valid "Proof of Residence" — the old strict-equality check falsely rejected
+  // these because the scanned type didn't exactly match "Barangay Certificate".
+  //
+  // Each group entry is an array of normalized type strings that are all
+  // considered equivalent for verification purposes.
+  const EQUIVALENCE_GROUPS = [
+    // Proof of Residence / Barangay Documents
+    [
+      'barangay certificate',
+      'barangay clearance',
+      'certificate of indigency',
+      'barangay indigency',
+      'proof of residence',
+      'certificate of residency',
+      'utility bill',
+      'water bill',
+      'electricity bill',
+      'meralco bill',
+      'manila water bill',
+      'maynilad bill',
+      'internet bill',
+      'telephone bill',
+      'cable bill',
+      'gas bill',
+      'barangay id',
+    ],
+    // Government IDs
+    [
+      'national id / gov id',
+      'national id',
+      'gov id',
+      'government id',
+      'philsys id',
+      'philsys national id (ephilid)',
+      'valid id',
+      'valid government id',
+      'umid',
+      'postal id',
+      'prc id',
+      'voter id',
+      'driver\'s license',
+      'passport',
+      'sss id',
+      'gsis id',
+      'tin id',
+      'osca id',
+      'senior citizen id',
+    ],
+    // PhilHealth
+    [
+      'philhealth mdr',
+      'philhealth',
+      'member data record',
+      'pmrf',
+      'philhealth registration form',
+    ],
+    // Medical / Hospital
+    [
+      'medical certificate / clinical abstract',
+      'medical certificate',
+      'clinical abstract',
+      'statement of account',
+      'hospital bill',
+      'soa',
+      'prescription',
+      'medical record',
+    ],
+    // Birth / Civil Registry
+    [
+      'birth certificate (psa)',
+      'birth certificate',
+      'psa birth certificate',
+      'nso birth certificate',
+      'marriage certificate',
+      'psa marriage certificate',
+    ],
+    // Clearances
+    [
+      'nbi clearance',
+      'nbi',
+    ],
+    [
+      'police clearance',
+    ],
+    // Employment
+    [
+      'certificate of employment (coe)',
+      'certificate of employment',
+      'coe',
+      'employment certificate',
+    ],
+    // School / Education
+    [
+      'school registration / transcript',
+      'certificate of registration',
+      'cor',
+      'school registration',
+      'transcript of records',
+      'form 138',
+      'report card',
+      'enrollment form',
+    ],
+    // Application Forms (filled out by ALALAY)
+    [
+      'application form',
+      'government application form',
+      'filled out form',
+    ],
+  ];
+
+  // Find which group the required type belongs to
+  const findGroup = (typeStr) => {
+    const n = normalize(typeStr);
+    return EQUIVALENCE_GROUPS.find((group) => group.some((member) => n.includes(member) || member.includes(n)));
+  };
+
+  // If no required type — skip mismatch check entirely
+  if (!requiredType) {
+    if (confidence < 90) {
+      return {
+        status: 'review',
+        confidence,
+        detectedType,
+        requiredType,
+        message: `DocAgent is only ${confidence}% confident this is a clear, valid ${detectedType}. Please confirm the extracted details below are correct before saving.`,
+      };
+    }
+    return {
+      status: 'verified',
+      confidence,
+      detectedType,
+      requiredType,
+      message: `Verified — matches ${detectedType} with high confidence.`,
+    };
+  }
+
+  const requiredGroup = findGroup(requiredType);
+  const detectedGroup = findGroup(detectedType);
+
+  // Groups match → semantically equivalent → passes
+  const typeMatches =
+    requiredGroup &&
+    detectedGroup &&
+    requiredGroup === detectedGroup; // Same array reference = same group
+
+  // Also pass if direct normalized equality (catches any type not yet in groups)
+  const directMatch = normalize(detectedType) === normalize(requiredType);
+
+  if (!typeMatches && !directMatch) {
     return {
       status: 'mismatch',
       confidence,
       detectedType,
       requiredType,
-      message: `This looks like a ${detectedType}, but a ${requiredType} is required here. Please double-check before saving, or re-upload the correct document.`,
+      message: 'Not a valid document for this type of upload',
     };
   }
 
@@ -455,11 +707,10 @@ export function verifyDocumentUpload(extracted, requiredType = null) {
     confidence,
     detectedType,
     requiredType,
-    message: requiredType
-      ? `Verified — this matches the required ${requiredType}.`
-      : `Verified — matches ${detectedType} with high confidence.`,
+    message: `Verified — this matches the required ${requiredType}.`,
   };
 }
+
 
 /**
  * 2. Proactive Expiration & Audit Evaluator

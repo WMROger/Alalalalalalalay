@@ -137,7 +137,7 @@ export function matchRequirementWithUserDoc(reqName, userDocs = [], user = null)
       docType === 'id' || docCat === 'id' || docCat === 'identity';
 
     const isDocBarangay =
-      hasWord(docMeta, /\b(barangay|indigency|calamity|residency|clearance|proof of residence)\b/i) &&
+      hasWord(docMeta, /\b(barangay|indigency|calamity|residency|clearance|proof of residence|utility|bill|water|electric|meralco|maynilad|manila water|mcwd|pldt|globe|converge|billing)\b/i) &&
       !isDocAnId;
 
     const isDocPhilHealth = hasWord(docMeta, /\b(philhealth|pmrf|mdr|health insurance)\b/i);
@@ -151,12 +151,12 @@ export function matchRequirementWithUserDoc(reqName, userDocs = [], user = null)
 
     // 2. Strict Requirement-to-Document Assignment Guardrails
 
-    // A. Requirement: Barangay Calamity Certificate / Barangay Indigency / Proof of Residence
-    if (hasWord(q, /\b(calamity|indigency|barangay|proof of residence|certificate of residency|residence certificate)\b/i)) {
-      if (isDocBarangay || (hasWord(docMeta, /\b(calamity|indigency|residency|clearance)\b/i) && !hasWord(docMeta, /\bphilid\b/i))) {
+    // A. Requirement: Barangay Calamity Certificate / Barangay Indigency / Proof of Residence / Utility Bill
+    if (hasWord(q, /\b(calamity|indigency|barangay|proof of residence|certificate of residency|residence certificate|utility bill|billing statement|water bill)\b/i)) {
+      if (isDocBarangay || (hasWord(docMeta, /\b(calamity|indigency|residency|clearance|utility|bill|water|electric|meralco|maynilad|billing|proof of residence)\b/i) && !hasWord(docMeta, /\bphilid\b/i))) {
         return doc;
       }
-      continue; // Never match a PhilSys ID to a Barangay certificate
+      continue; // Never match a PhilSys ID to a Barangay certificate / Proof of residence
     }
 
     // B. Requirement: Valid Government Issued Photo ID (UMID / PhilSys ID / Passport)

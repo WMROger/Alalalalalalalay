@@ -597,41 +597,6 @@ export const DocumentsView = () => {
             </div>
           </div>
 
-          {/* ========================================================================= */}
-          {/* FEATURED CARD: APPLIED FORMS HUB (SUB-PAGE ACCESS)                        */}
-          {/* ========================================================================= */}
-          <div className="p-4 sm:p-5 rounded-3xl bg-gradient-to-r from-violet-900 via-indigo-900 to-slate-900 text-white shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-4 border border-violet-500/30">
-            <div className="flex items-start gap-3.5">
-              <div className="w-12 h-12 rounded-2xl bg-white/10 backdrop-blur-md border border-white/20 text-violet-300 flex items-center justify-center flex-shrink-0 shadow-inner">
-                <FileSpreadsheet className="w-6 h-6" />
-              </div>
-              <div className="space-y-1">
-                <div className="flex items-center gap-2">
-                  <h3 className="text-sm sm:text-base font-extrabold tracking-tight">
-                    Applied Forms Hub & Intake Documents
-                  </h3>
-                  <span className="px-2 py-0.5 rounded-full bg-violet-400/20 border border-violet-300/30 text-violet-200 text-[10px] font-black">
-                    {appliedForms.length} Forms Saved
-                  </span>
-                </div>
-                <p className="text-xs text-violet-200/90 leading-relaxed">
-                  View and manage all government applications filled via AI in a structured Google Docs–style table format with print and .DOC export.
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2 flex-shrink-0">
-              <button
-                type="button"
-                onClick={() => setSubView('applied_forms')}
-                className="px-4 py-2.5 rounded-2xl bg-white text-violet-950 hover:bg-violet-50 text-xs font-black transition-all shadow-md cursor-pointer flex items-center gap-1.5"
-              >
-                <Table className="w-4 h-4 text-violet-700" />
-                <span>Open Forms Table View</span>
-                <ChevronRight className="w-3.5 h-3.5 ml-0.5" />
-              </button>
-            </div>
-          </div>
 
           {/* Proactive Expiration & Renewal Action Alert */}
           {(expiringCount > 0 || expiredCount > 0) && (

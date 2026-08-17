@@ -19,7 +19,7 @@ import {
 import { useApp } from '../../context/AppContext';
 import { IOSSheet } from '../common/IOSSheet';
 import { IOSButton } from '../common/IOSButton';
-import { scanAndExtractDocumentMetadata, OCR_PRESET_TEMPLATES, getDocumentPlaceholderThumbnail, verifyDocumentUpload } from '../../services/docAgentService';
+import { scanAndExtractDocumentMetadata, getDocumentPlaceholderThumbnail, verifyDocumentUpload } from '../../services/docAgentService';
 
 export const DocumentUploadModal = () => {
   const {
@@ -67,6 +67,7 @@ export const DocumentUploadModal = () => {
   const documentTypes = [
     'National ID / Gov ID',
     'Barangay Certificate',
+    'Proof of Residence / Utility Bill',
     'PhilHealth MDR',
     'NBI Clearance',
     'Police Clearance',
@@ -74,6 +75,8 @@ export const DocumentUploadModal = () => {
     'Medical Certificate / Clinical Abstract',
     'Certificate of Employment (COE)',
     'School Registration / Transcript',
+    'PWD ID / Disability Certificate',
+    'Senior Citizen ID (OSCA)',
   ];
 
   // Process Document with DocAgent OCR
@@ -81,7 +84,7 @@ export const DocumentUploadModal = () => {
     setIsScanningOcr(true);
     setMismatchAcknowledged(false);
     try {
-      const extracted = await scanAndExtractDocumentMetadata(fileOrName);
+      const extracted = await scanAndExtractDocumentMetadata(fileOrName, {}, requiredType);
       setOcrResult(extracted);
       setDocName(extracted.name);
       setDocType(extracted.type);
@@ -124,14 +127,6 @@ export const DocumentUploadModal = () => {
       const file = e.target.files[0];
       setSelectedFile(file);
       handleProcessFileWithDocAgent(file);
-    }
-  };
-
-  // Quick Preset Selector for Fast Testing
-  const handleSelectPreset = (presetKey) => {
-    const preset = OCR_PRESET_TEMPLATES[presetKey];
-    if (preset) {
-      handleProcessFileWithDocAgent(preset.name);
     }
   };
 
@@ -204,34 +199,6 @@ export const DocumentUploadModal = () => {
       maxWidth="max-w-xl"
     >
       <form onSubmit={handleSubmit} className="space-y-4 select-none">
-        {/* Quick Simulation Presets */}
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-            <span className="flex items-center gap-1 text-[#093a96]">
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>DocAgent Quick OCR Presets:</span>
-            </span>
-            <span className="text-[10px] text-slate-400 font-normal">Click to auto-scan</span>
-          </div>
-
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
-            {[
-              { key: 'philsys', label: '🇵🇭 PhilSys ID', color: 'bg-blue-50 hover:bg-blue-100/80 border-blue-200 text-[#093a96]' },
-              { key: 'pwd_id', label: '♿ PWD ID', color: 'bg-indigo-50 hover:bg-indigo-100/80 border-indigo-200 text-indigo-900' },
-              { key: 'indigency', label: '📜 Brgy. Indigency', color: 'bg-amber-50 hover:bg-amber-100/80 border-amber-200 text-amber-900' },
-              { key: 'philhealth_mdr', label: '💊 PhilHealth MDR', color: 'bg-rose-50 hover:bg-rose-100/80 border-rose-200 text-rose-900' },
-            ].map((preset) => (
-              <button
-                key={preset.key}
-                type="button"
-                onClick={() => handleSelectPreset(preset.key)}
-                className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-bold transition-all text-left truncate cursor-pointer shadow-2xs ${preset.color}`}
-              >
-                {preset.label}
-              </button>
-            ))}
-          </div>
-        </div>
 
         {/* Upload Drop Zone */}
         <div
