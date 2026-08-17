@@ -226,11 +226,9 @@ export const UserProfileView = () => {
       {/* Header Profile Card */}
       <IOSCard className="bg-gradient-to-br from-white via-slate-50 to-blue-50/30 border border-slate-200">
         <div className="flex flex-col sm:flex-row items-center sm:items-start gap-5 text-center sm:text-left">
-          <img
-            src={user.avatarUrl}
-            alt={user.fullName}
-            className="w-20 h-20 rounded-full object-cover ring-4 ring-blue-500/20 shadow-md"
-          />
+          <div className="w-20 h-20 rounded-2xl bg-gradient-to-tr from-[#093a96] via-blue-600 to-indigo-600 flex items-center justify-center text-white shadow-lg shadow-blue-900/20 ring-4 ring-blue-500/20 flex-shrink-0">
+            <User className="w-10 h-10 text-white" />
+          </div>
 
           <div className="space-y-1.5 flex-1">
             <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2">

@@ -41,17 +41,17 @@ export const Header = () => {
           )}
         </button>
 
-        {/* User Profile Avatar matching Image 3 */}
-        <div
+        {/* User Profile Avatar Icon */}
+        <button
+          type="button"
           onClick={() => setActiveTab('profile')}
-          className="cursor-pointer"
+          className={`w-10 h-10 rounded-full bg-gradient-to-tr from-[#093a96] to-blue-600 flex items-center justify-center text-white ring-2 transition-all cursor-pointer shadow-sm hover:scale-105 ${
+            activeTab === 'profile' ? 'ring-[#093a96] ring-offset-2' : 'ring-white/80 hover:shadow-md'
+          }`}
+          title="View Profile"
         >
-          <img
-            src={user.avatarUrl}
-            alt={user.firstName}
-            className="w-10 h-10 rounded-full object-cover ring-2 ring-white shadow-sm hover:scale-105 transition-all"
-          />
-        </div>
+          <User className="w-5 h-5 text-white" />
+        </button>
       </div>
     </header>
   );

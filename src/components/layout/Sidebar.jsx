@@ -33,7 +33,7 @@ export const Sidebar = () => {
   const citizenNav = [
     { id: 'home', label: t('nav.home'), icon: Home },
     { id: 'explore', label: t('nav.explore'), icon: Compass },
-    { id: 'ai-chat', label: t('nav.aiChat'), icon: Sparkles },
+    // { id: 'ai-chat', label: t('nav.aiChat'), icon: Sparkles },
     // { id: 'apply', label: t('nav.apply'), icon: ClipboardList},
     { id: 'documents', label: t('nav.documents'), icon: FileText },
     { id: 'benefits', label: t('nav.benefits'), icon: Award },

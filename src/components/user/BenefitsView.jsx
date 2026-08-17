@@ -74,7 +74,7 @@ const TrackerCard = ({ tracker, onAdvance }) => {
     setSimRunning(true);
 
     // Countdown display
-    let secs = 10;
+    let secs = 3;
     setCountdown(secs);
     countdownRef.current = setInterval(() => {
       secs -= 1;
@@ -85,11 +85,11 @@ const TrackerCard = ({ tracker, onAdvance }) => {
       }
     }, 1000);
 
-    // Advance step after 10s
+    // Advance step after 3s
     timerRef.current = setTimeout(() => {
       onAdvance(tracker.id);
       setSimRunning(false);
-    }, 10000);
+    }, 3000);
   };
 
   // Clean up on unmount
