@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import confetti from 'canvas-confetti';
 import {
   supabase,
@@ -308,14 +308,16 @@ export const AppProvider = ({ children }) => {
 
   // Citizen-confirmed receipt of a benefit — distinct from "applied" (submitted) since a
   // submitted application isn't the same as the benefit actually being granted/received.
-  const markBenefitAcquired = (oppId) => {
+  const markBenefitAcquired = (oppId, { silent = false } = {}) => {
     const opp = opportunities.find((o) => o.id === oppId);
     setAutoApplyQueue((prev) =>
       prev.map((entry) =>
         entry.oppId === oppId ? { ...entry, status: 'acquired', acquiredAt: new Date().toISOString() } : entry
       )
     );
-    addToast('Benefit Received', `${opp?.title || 'This benefit'} was marked as received.`, 'success');
+    if (!silent) {
+      addToast('Benefit Received', `${opp?.title || 'This benefit'} was marked as received.`, 'success');
+    }
   };
 
   const clearAutoApplyHistory = () => {
@@ -487,10 +489,23 @@ export const AppProvider = ({ children }) => {
   const [scrapingProgress, setScrapingProgress] = useState({ stage: '', percent: 0, currentUrl: '' });
   const [toasts, setToasts] = useState([]);
 
-  // Toast Notification Manager
+  // Toast Notification Manager (with deduplication & debouncing)
+  const recentToastsRef = useRef(new Map());
+
   const addToast = (title, message, type = 'info', duration = 4000) => {
-    const id = `toast_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`;
-    setToasts((prev) => [...prev, { id, title, message, type }]);
+    const key = `${title}::${message}`;
+    const now = Date.now();
+    const lastTriggered = recentToastsRef.current.get(key) || 0;
+    if (now - lastTriggered < 1500) {
+      return; // Debounce duplicates within 1.5 seconds
+    }
+    recentToastsRef.current.set(key, now);
+
+    const id = `toast_${now}_${Math.random().toString(36).substr(2, 4)}`;
+    setToasts((prev) => {
+      if (prev.some((t) => t.title === title && t.message === message)) return prev;
+      return [...prev, { id, title, message, type }];
+    });
     setTimeout(() => {
       removeToast(id);
     }, duration);
@@ -562,42 +577,50 @@ export const AppProvider = ({ children }) => {
 
   // Advance a tracker step (1→2→3). Fires notifications and marks acquired on step 3.
   const advanceTrackerStep = (trackerId) => {
+    let targetTracker = null;
+    let computedNextStep = null;
+
     setApplicationTrackers((prev) => {
       const updated = prev.map((t) => {
         if (t.id !== trackerId) return t;
         const nextStep = Math.min(t.currentStep + 1, 3);
-        if (nextStep === 2) {
-          addNotification({
-            type: 'application_submitted',
-            title: '🔍 Application Under Review',
-            message: `${t.agency} is now reviewing your application for "${t.oppTitle}". You'll be notified once a decision is made.`,
-            badgeColor: '#FF9500',
-            icon: 'RefreshCw',
-            actionText: 'Track Progress',
-            oppId: t.oppId,
-          });
-          addToast('Under Review', `${t.agency} is reviewing your application.`, 'info', 5000);
-        } else if (nextStep === 3) {
-          addNotification({
-            type: 'application_approved',
-            title: '🎉 Congratulations! Application Approved',
-            message: `You are now officially enrolled in "${t.oppTitle}"! Welcome — you are now part of this program. Visit the Benefits page to see your new benefit.`,
-            badgeColor: '#34C759',
-            icon: 'ShieldCheck',
-            actionText: 'View Benefit',
-            oppId: t.oppId,
-          });
-          addToast('🎉 Approved!', `You are now part of "${t.oppTitle}"!`, 'success', 8000);
-          // Mark as acquired in autoApplyQueue
-          markBenefitAcquired(t.oppId);
-          // Fire confetti
-          confetti({ particleCount: 160, spread: 80, origin: { y: 0.5 } });
-        }
+        targetTracker = t;
+        computedNextStep = nextStep;
         return { ...t, currentStep: nextStep };
       });
       localStorage.setItem('alalay_app_trackers', JSON.stringify(updated));
       return updated;
     });
+
+    if (!targetTracker || !computedNextStep) return;
+
+    if (computedNextStep === 2) {
+      addNotification({
+        type: 'application_submitted',
+        title: '🔍 Application Under Review',
+        message: `${targetTracker.agency} is now reviewing your application for "${targetTracker.oppTitle}". You'll be notified once a decision is made.`,
+        badgeColor: '#FF9500',
+        icon: 'RefreshCw',
+        actionText: 'Track Progress',
+        oppId: targetTracker.oppId,
+      });
+      addToast('Under Review', `${targetTracker.agency} is reviewing your application.`, 'info', 5000);
+    } else if (computedNextStep === 3) {
+      addNotification({
+        type: 'application_approved',
+        title: '🎉 Congratulations! Application Approved',
+        message: `You are now officially enrolled in "${targetTracker.oppTitle}"! Welcome — you are now part of this program. Visit the Benefits page to see your new benefit.`,
+        badgeColor: '#34C759',
+        icon: 'ShieldCheck',
+        actionText: 'View Benefit',
+        oppId: targetTracker.oppId,
+      });
+      addToast('🎉 Approved!', `You are now part of "${targetTracker.oppTitle}"!`, 'success', 8000);
+      // Mark as acquired silently so it doesn't fire a redundant duplicate toast
+      markBenefitAcquired(targetTracker.oppId, { silent: true });
+      // Fire confetti
+      confetti({ particleCount: 160, spread: 80, origin: { y: 0.5 } });
+    }
   };
 
   const removeToast = (id) => {
@@ -1827,14 +1850,15 @@ export const AppProvider = ({ children }) => {
       fileSize: docData.fileSize || '1.4 MB',
       fileType: docData.fileType || 'PDF',
       status: 'Valid',
-      verifiedBadge: 'DocAgent Verified ✓',
-      uploadedAt: 'Just now via DocAgent OCR',
+      verifiedBadge: docData.verifiedBadge || 'DocAgent Verified ✓',
+      uploadedAt: docData.uploadedAt || 'Just now via DocAgent OCR',
       thumbnail: docData.thumbnail || getDocumentPlaceholderThumbnail(docData.type || 'Identity Card'),
       attributes: docData.attributes || {},
+      ...docData, // Preserves isApplicationForm, programId, programTitle, template, applicationData, etc.
     };
 
     setDocuments((prev) => {
-      const updated = [newDoc, ...prev];
+      const updated = [newDoc, ...prev.filter((d) => d.id !== newDoc.id)];
       localStorage.setItem('alalay_documents', JSON.stringify(updated));
       return updated;
     });

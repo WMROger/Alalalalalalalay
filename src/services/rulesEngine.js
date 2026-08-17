@@ -114,9 +114,14 @@ export function matchRequirementWithUserDoc(reqName, userDocs = [], user = null)
   // When ALALAY auto-saves a completed intake form (isApplicationForm: true) to
   // the vault, we treat that as fulfilling any "application form" requirement so
   // the checklist in OpportunityDetailModal immediately shows it as "Ready ✓".
-  const isFormReq = /application form|filled out|official.*(government )?form|registration form/i.test(q);
+  const isFormReq = /application form|filled out|official.*(government )?form|registration form|pmrf|intake form|e-6|form e-6|duly accomplished/i.test(q);
   if (isFormReq) {
-    const vaultForm = userDocs.find((d) => d.isApplicationForm === true);
+    const vaultForm = userDocs.find(
+      (d) =>
+        d.isApplicationForm === true ||
+        d.type === 'Application Form' ||
+        (d.name && /application form|pmrf|form e-6|intake/i.test(d.name))
+    );
     if (vaultForm) return vaultForm;
     // No vault form found — fall through so the modal still shows "Check / Fill Out Form"
     return null;

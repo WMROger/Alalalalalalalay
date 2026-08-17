@@ -6,7 +6,7 @@
  * DOC-format generation, Word document export, and printing.
  */
 
-import { getApiKey } from './geminiService';
+import { getApiKey, askAlalayAI } from './geminiService';
 
 // =============================================================================
 // 1. PROGRAM REGISTRY (Phase 1 — Program Selector Cards)
@@ -635,32 +635,254 @@ export function getActiveGapFields(session) {
 // 4. FIELD VALUE EXTRACTION & AGENTIC PROCESSING LOOP
 // =============================================================================
 
+/**
+ * Curated Knowledge Base for in-form citizen inquiries and terminology questions
+ */
+const CIVIC_KNOWLEDGE_BASE = [
+  {
+    keywords: ['osca', 'senior citizen', 'senior id', 'senior citizen id', 'ra 9994', 'ra 10645', 'office for senior'],
+    title: 'OSCA (Office for Senior Citizens Affairs) ID',
+    explanation:
+      '**OSCA (Office for Senior Citizens Affairs)** is a local government office established in every city and municipality under **RA 9994 (Expanded Senior Citizens Act)**.\n\n' +
+      '• **What is an OSCA ID?** It is the official senior citizen identification card issued to Filipino residents aged 60 and above.\n' +
+      '• **Statutory Benefits:** 20% discount and 12% VAT exemption on prescription medicines, professional medical fees, hospital services, transport, groceries, and dining.\n' +
+      '• **PhilHealth Mandatory Coverage:** Under **RA 10645**, all senior citizens enrolled with OSCA/PhilHealth receive automatic lifetime healthcare coverage.\n\n' +
+      '💡 *If you already have your OSCA ID number or PhilSys National ID (CRN), please type it below. If you don\'t have one on hand or are registering for the first time, simply type **"none"**.*',
+  },
+  {
+    keywords: ['philsys', 'crn', 'national id', 'ephilid', 'philid', 'psa id'],
+    title: 'PhilSys National ID & Common Reference Number (CRN)',
+    explanation:
+      '**PhilSys (Philippine Identification System)** is the national digital identity card issued by the Philippine Statistics Authority (PSA).\n\n' +
+      '• **What is the CRN?** The **Common Reference Number (CRN)** is the permanent 16-digit or 12-digit identification number printed on your PhilID or digital ePhilID.\n' +
+      '• **Usage:** It serves as official proof of identity accepted across all government agencies, banks, and social benefit programs.',
+  },
+  {
+    keywords: ['philhealth pin', 'pin', 'philhealth id', 'philhealth number', 'member data record', 'mdr', 'pmrf'],
+    title: 'PhilHealth Identification Number (PIN)',
+    explanation:
+      'A **PhilHealth PIN** is a unique 12-digit permanent number (format: `XX-XXXXXXXXX-X`) assigned to registered PhilHealth beneficiaries.\n\n' +
+      '• **Where to find it:** On your Member Data Record (MDR), physical PhilHealth ID card, or previous payment receipts.\n' +
+      '• **First-Time Applicants:** If you do not have a PhilHealth number yet, type **"none"** and ALALAY will flag this application as a first-time registration so a new PIN is assigned automatically upon submission.',
+  },
+  {
+    keywords: ['sss number', 'sss id', 'umid', 'sss loan', 'salary loan', 'member loan'],
+    title: 'SSS Number & Salary Loan Details',
+    explanation:
+      'Your **SSS Number** is a 10-digit identification number (format: `XX-XXXXXXX-X`) assigned by the Social Security System.\n\n' +
+      '• **Where to find it:** On your UMID card, SSS ID, or SSS online portal account.\n' +
+      '• **Salary Loan:** Members with at least 36 posted contributions can borrow cash proceeds equivalent to up to 2 months of their average monthly salary credit.',
+  },
+  {
+    keywords: ['tupad', 'dole tupad', 'emergency employment', 'peso', 'displaced worker'],
+    title: 'DOLE TUPAD (Emergency Employment Program)',
+    explanation:
+      '**DOLE TUPAD (Tulong Panghanapbuhay sa Ating Disadvantaged/Displaced Workers)** is an emergency wage employment assistance program by DOLE.\n\n' +
+      '• Provides 10 to 30 days of community-based work (cleaning, sanitation, agro-forestry, or relief logistics).\n' +
+      '• Beneficiaries are paid the prevailing regional daily minimum wage upon project completion.',
+  },
+  {
+    keywords: ['aics', 'dswd aics', 'crisis assistance', 'financial assistance', 'medical assistance dswd', 'burial assistance'],
+    title: 'DSWD AICS (Assistance to Individuals in Crisis Situation)',
+    explanation:
+      '**DSWD AICS** provides direct financial assistance, cash grants, and guarantee letters to indigent families facing sudden medical, hospitalization, burial, transportation, or educational distress.',
+  },
+  {
+    keywords: ['barangay certificate', 'indigency', 'residency', 'clearance', 'barangay clearance'],
+    title: 'Barangay Certificate of Indigency / Residency',
+    explanation:
+      'A **Barangay Certificate** is an official clearance issued by your local Barangay Hall certifying your community residency and economic status. Under RA 11261, first-time jobseekers can request this for free.',
+  },
+];
+
+/**
+ * Intelligent Intent Classifier: Determines if the user is asking a question / requesting
+ * clarification rather than providing a direct field answer.
+ */
+/**
+ * Accurate detector for ID number fields (prevents words like "residency" from matching)
+ */
+function isIdentificationNumberField(field) {
+  if (!field) return false;
+  const id = field.id || '';
+  const label = (field.label || '').toLowerCase();
+
+  if (/(?:^|[_\-])(?:id|pin|sss|crn|tin|umid|philsys)(?:$|[_\-])/i.test(id)) return true;
+  if (/Id$|_id$/i.test(id) && !/residency|validity|guid|status/i.test(id)) return true;
+  if (/number|pin|crn|tin/i.test(id)) return true;
+  if (
+    label.includes('id number') ||
+    label.includes('pin') ||
+    label.includes('sss member id') ||
+    label.includes('identification number')
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Intelligent Intent Classifier: Determines if the user is asking a question / requesting
+ * clarification rather than providing a direct field answer.
+ */
+export function isUserInquiryOrQuestion(userMessage, currentField) {
+  const text = String(userMessage || '').trim();
+  if (!text) return false;
+  const lower = text.toLowerCase();
+
+  // If input is a direct affirmative or negative answer, it is NEVER an inquiry!
+  if (/^(yes|no|yep|yeah|y|nope|oo|opo|hindi|meron|meron po|mayroon|wala|wala po|sure|ok|okay|n\/a|none|on hand|available)$/i.test(lower)) {
+    return false;
+  }
+
+  // 1. Explicit Question Mark
+  if (text.includes('?')) return true;
+
+  // 2. Question / Inquiry Starters (English, Tagalog, Dialects)
+  const questionStarters = [
+    /^what\b/i, /^what's\b/i, /^whats\b/i, /^why\b/i, /^how\b/i, /^where\b/i, /^when\b/i, /^who\b/i,
+    /^ano\b/i, /^ano po\b/i, /^ano ba\b/i, /^bakit\b/i, /^paano\b/i, /^saan\b/i, /^kailan\b/i, /^sino\b/i,
+    /^explain\b/i, /^tell me\b/i, /^can you\b/i, /^could you\b/i, /^pede\b/i, /^pwede\b/i, /^meaning\b/i,
+    /^definition\b/i, /^is it\b/i, /^do i need\b/i, /^kailangan ba\b/i, /^para saan\b/i, /^ano ibig sabihin\b/i,
+    /^help\b/i, /^i don't understand\b/i, /^di ko maintindihan\b/i, /^di ko alam\b/i, /^i don't know\b/i,
+    /^unsa\b/i, /^ngano\b/i, /^asa\b/i, /^unya\b/i,
+  ];
+  if (questionStarters.some((rx) => rx.test(text))) return true;
+
+  // 3. Question / Inquiry phrases inside text
+  const queryPhrases = [
+    'what is', 'what are', 'what does', 'ano ang', 'ano po ang', 'ano ba ang',
+    'para saan', 'bakit kailangan', 'how to get', 'saan kukuha', 'saan makakakuha',
+    'paano kumuha', 'how do i', 'meaning of', 'explain', 'paano kung wala',
+    'what if i dont', 'what if i don\'t', 'how can i', 'where can i', 'saan pwede',
+    'i don\'t have', 'i do not have', 'wala akong', 'saan makikita', 'where to find',
+  ];
+  if (queryPhrases.some((qp) => lower.includes(qp))) return true;
+
+  // 4. If the field is expecting a strict ID/number/salary, but input is purely conversational text with 3+ words
+  if (isIdentificationNumberField(currentField) && !/\d/.test(text) && text.split(/\s+/).length >= 3) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Generates an intelligent, authoritative civic explanation for an in-form user inquiry
+ */
+export async function getCivicExplanation(userMessage, currentField, session) {
+  const text = String(userMessage || '').toLowerCase();
+
+  // 1. Curated high-accuracy knowledge base lookup
+  const match = CIVIC_KNOWLEDGE_BASE.find((entry) =>
+    entry.keywords.some((kw) => text.includes(kw))
+  );
+  if (match) {
+    return `ℹ️ **${match.title}**\n\n${match.explanation}`;
+  }
+
+  // 2. Query Ask ALALAY AI engine if available
+  try {
+    const aiAnswer = await askAlalayAI(userMessage, {
+      contextType: 'general',
+      conversationHistory: session?.conversationHistory || [],
+    });
+    if (aiAnswer && aiAnswer.length > 20) {
+      return aiAnswer;
+    }
+  } catch (err) {
+    console.warn('[ApplyAI] AI inquiry explanation fallback:', err);
+  }
+
+  // 3. Contextual fallback explanation based on the current field
+  return (
+    `ℹ️ **Regarding ${currentField.label}:**\n\n` +
+    `This information is required by **${session?.template?.agency || 'the issuing government agency'}** ` +
+    `to verify your identity and process your official **${session?.programTitle || 'application'}**.\n\n` +
+    (currentField.hint ? `*Expected format: ${currentField.hint}*` : '')
+  );
+}
+
 export async function extractFieldValue(field, userMessage) {
   const raw = String(userMessage || '').trim();
   if (!raw) return { value: null, confidence: 'none' };
+  const lower = raw.toLowerCase();
 
+  // 1. Handle Yes / No / Affirmative / Negative responses
+  const isYes = /^(yes|yep|yeah|y|oo|opo|meron|meron po|mayroon|on hand|available|have|ok|okay|sure|verified|true)$/i.test(lower);
+  const isNo = /^(no|nope|hindi|wala|wala po|not yet|none|hindi po|false)$/i.test(lower);
+
+  if (isYes) {
+    if (Array.isArray(field.options) && field.options.length > 0) {
+      const match = field.options.find((o) => /^yes/i.test(o));
+      if (match) return { value: match, confidence: 'high' };
+    }
+    if (field.hint?.toLowerCase().includes('yes') || field.question?.toLowerCase().includes('do you have') || field.question?.toLowerCase().includes('have you')) {
+      return { value: 'Yes (On Hand)', confidence: 'high' };
+    }
+    return { value: 'Yes', confidence: 'high' };
+  }
+
+  if (isNo) {
+    if (Array.isArray(field.options) && field.options.length > 0) {
+      const match = field.options.find((o) => /^no/i.test(o));
+      if (match) return { value: match, confidence: 'high' };
+    }
+    if (field.hint?.toLowerCase().includes('yes') || field.question?.toLowerCase().includes('do you have') || field.question?.toLowerCase().includes('have you')) {
+      return { value: 'No (Pending / To Follow)', confidence: 'high' };
+    }
+    return { value: 'No', confidence: 'high' };
+  }
+
+  // 2. Handle "none", "wala", "first time", "n/a"
+  const isNone = /^(none|wala|wala pa|wala po|wala pa po|n\/a|na|first time|bago|to follow|pending)$/i.test(lower);
+  if (isNone) {
+    if (field.id === 'philhealthPin') {
+      return { value: 'First-Time Registrant (No existing PIN)', confidence: 'high' };
+    }
+    if (isIdentificationNumberField(field)) {
+      return { value: 'To be verified upon submission / Pending', confidence: 'medium' };
+    }
+    return { value: 'None / First-Time', confidence: 'high' };
+  }
+
+  // 3. Custom extractor
   if (typeof field.extractOption === 'function') {
     const opt = field.extractOption(raw);
     if (opt) return { value: opt, confidence: 'high' };
   }
 
+  // 4. Options array matching
   if (Array.isArray(field.options) && field.options.length > 0) {
-    const lower = raw.toLowerCase();
-    const match = field.options.find((o) => lower.includes(o.toLowerCase()));
+    const match = field.options.find((o) => lower.includes(o.toLowerCase()) || o.toLowerCase().includes(lower));
     if (match) return { value: match, confidence: 'high' };
   }
 
-  if (field.id.toLowerCase().includes('number') || field.id.toLowerCase().includes('pin') || field.id.toLowerCase().includes('sss')) {
+  // 5. Strict ID / PIN / Number fields
+  if (isIdentificationNumberField(field)) {
     const digits = raw.replace(/\D/g, '');
-    if (digits.length >= 7) return { value: raw, confidence: 'high' };
+    if (digits.length >= 4 || /[A-Z0-9-]{4,}/i.test(raw)) {
+      return { value: raw, confidence: 'high' };
+    }
+    return { value: null, confidence: 'none' };
   }
 
-  if (field.id.toLowerCase().includes('salary') || field.id.toLowerCase().includes('income') || field.id.toLowerCase().includes('amount')) {
+  // 6. Salary / Income / Currency fields
+  if (
+    field.id.toLowerCase().includes('salary') ||
+    field.id.toLowerCase().includes('income') ||
+    field.id.toLowerCase().includes('amount')
+  ) {
     const digits = raw.replace(/[^0-9.]/g, '');
     const num = parseFloat(digits);
     if (!isNaN(num) && num > 0) {
       return { value: `₱${num.toLocaleString()}`, confidence: 'high' };
     }
+    return { value: null, confidence: 'none' };
+  }
+
+  if (raw.length < 2) {
+    return { value: null, confidence: 'none' };
   }
 
   return { value: raw, confidence: 'medium' };
@@ -683,19 +905,53 @@ export async function processUserReply(session, userMessage) {
   }
 
   const currentField = activeGaps[0];
-  const extraction = await extractFieldValue(currentField, userMessage);
 
-  if (!extraction.value) {
+  // ── Step 1: Detect if citizen is asking a question or requesting explanation ──
+  if (isUserInquiryOrQuestion(userMessage, currentField)) {
+    const explanation = await getCivicExplanation(userMessage, currentField, session);
+    const agentMessage = `${explanation}\n\n---\n👉 **Whenever you're ready:** ${currentField.question}`;
+
+    const updatedSession = {
+      ...session,
+      conversationHistory: [
+        ...session.conversationHistory,
+        { role: 'citizen', text: userMessage, fieldId: null },
+        { role: 'agent', text: agentMessage, fieldId: null },
+      ],
+    };
+
     return {
-      session,
-      agentMessage: currentField.validationHint
-        ? `Could you please provide a valid ${currentField.label}? (${currentField.validationHint})`
-        : `Could you clarify that for ${currentField.label}?`,
+      session: updatedSession,
+      agentMessage,
       fieldFilled: null,
       isComplete: false,
     };
   }
 
+  // ── Step 2: Extract and validate field answer ──
+  const extraction = await extractFieldValue(currentField, userMessage);
+
+  if (!extraction.value) {
+    const validationMessage = currentField.validationHint
+      ? `Could you please provide a valid ${currentField.label}? (${currentField.validationHint})`
+      : `Could you clarify that for **${currentField.label}**? ${currentField.question}`;
+
+    return {
+      session: {
+        ...session,
+        conversationHistory: [
+          ...session.conversationHistory,
+          { role: 'citizen', text: userMessage, fieldId: null },
+          { role: 'agent', text: validationMessage, fieldId: null },
+        ],
+      },
+      agentMessage: validationMessage,
+      fieldFilled: null,
+      isComplete: false,
+    };
+  }
+
+  // ── Step 3: Record valid field answer and advance ──
   const updatedSession = {
     ...session,
     filledFields: {
@@ -945,6 +1201,34 @@ export function generateDocFormattedHtml(doc, user = {}) {
     </body>
     </html>
   `;
+}
+
+/**
+ * Exports / Downloads the application form as an official formatted PDF
+ */
+export function downloadApplicationAsPdf(doc, user = {}) {
+  const cleanTitle = (doc.name || doc.programTitle || 'Official_Application_Form').replace(/[^a-zA-Z0-9_-]/g, '_');
+  const html = generateDocFormattedHtml(doc, user);
+
+  // Open an isolated print view with the filename as document title so browser defaults to clean PDF saving
+  const printWindow = window.open('', '_blank', 'width=900,height=1000');
+  if (printWindow) {
+    printWindow.document.open();
+    printWindow.document.write(html);
+    printWindow.document.title = `${cleanTitle}.pdf`;
+    printWindow.document.close();
+    printWindow.focus();
+    setTimeout(() => {
+      try {
+        printWindow.print();
+      } catch (err) {
+        console.warn('[ApplyAI] Print window error:', err);
+      }
+    }, 450);
+  } else {
+    // Fallback using invisible iframe
+    printApplicationDocument(doc, user);
+  }
 }
 
 /**

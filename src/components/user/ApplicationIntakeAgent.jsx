@@ -32,6 +32,7 @@ import {
   getSessionStats,
   INTAKE_FORM_TEMPLATES,
   generateDocFormattedHtml,
+  downloadApplicationAsPdf,
   downloadApplicationAsDoc,
   printApplicationDocument,
 } from '../../services/applyAiService';
@@ -266,31 +267,107 @@ const LiveFormPreview = ({ session, currentFieldId }) => {
 };
 
 // =============================================================================
-// AGENT MESSAGE RENDERER — formats the agent's messages nicely
+// AGENT MESSAGE RENDERER — parses markdown bold, italics, bullets, and callouts
 // =============================================================================
+
+function formatItalics(str = '', parentIdx = 0) {
+  if (!str) return null;
+  const italicTokens = String(str).split(/(\*[^*]+?\*)/g);
+  return italicTokens.map((token, iIdx) => {
+    if (token.startsWith('*') && token.endsWith('*') && token.length >= 3) {
+      return (
+        <em key={`i-${parentIdx}-${iIdx}`} className="italic text-slate-700 font-medium not-italic-asterisk">
+          {token.slice(1, -1)}
+        </em>
+      );
+    }
+    return token;
+  });
+}
+
+export function formatInlineMarkdown(str = '') {
+  if (!str) return null;
+  // Clean triple asterisks if any
+  const cleaned = String(str).replace(/\*\*\*/g, '**');
+  const boldTokens = cleaned.split(/(\*\*.*?\*\*)/g);
+
+  return boldTokens.map((token, bIdx) => {
+    if (token.startsWith('**') && token.endsWith('**') && token.length >= 4) {
+      const inner = token.slice(2, -2);
+      return (
+        <strong key={`b-${bIdx}`} className="font-extrabold text-slate-900">
+          {formatItalics(inner, bIdx)}
+        </strong>
+      );
+    }
+    return formatItalics(token, bIdx);
+  });
+}
+
 const AgentMessage = ({ text }) => {
   if (!text) return null;
   const lines = text.split('\n');
+
   return (
-    <div className="space-y-1.5 text-sm leading-relaxed text-slate-800">
+    <div className="space-y-2 text-sm leading-relaxed text-slate-800">
       {lines.map((line, i) => {
         const raw = line.trim();
-        if (!raw) return <div key={i} className="h-1" />;
-        if (raw.startsWith('✅') || raw.startsWith('⚠️')) {
+        if (!raw) return <div key={i} className="h-0.5" />;
+
+        // Horizontal Rule Divider
+        if (raw === '---' || raw === '___' || raw === '***') {
+          return <hr key={i} className="border-slate-200/80 my-2" />;
+        }
+
+        // Section header or ℹ️ / ✅ / ⚠️
+        if (
+          raw.startsWith('ℹ️') ||
+          raw.startsWith('✅') ||
+          raw.startsWith('⚠️') ||
+          raw.startsWith('###') ||
+          raw.startsWith('##')
+        ) {
+          const clean = raw.replace(/^###?\s*/, '');
           return (
-            <p key={i} className="font-bold text-slate-900">
-              {raw}
-            </p>
+            <div key={i} className="font-extrabold text-slate-900 text-sm tracking-tight pt-0.5">
+              {formatInlineMarkdown(clean)}
+            </div>
           );
         }
-        if (raw.startsWith('**') && raw.endsWith('**')) {
+
+        // Action Callout Badge (e.g., 👉 Whenever you're ready... or 💡 Tip/Note...)
+        if (raw.startsWith('👉') || raw.startsWith('💡')) {
           return (
-            <p key={i} className="font-bold text-[#093a96]">
-              {raw.replace(/\*\*/g, '')}
-            </p>
+            <div
+              key={i}
+              className={`p-2.5 rounded-xl text-xs sm:text-sm font-medium ${
+                raw.startsWith('👉')
+                  ? 'bg-blue-50 border border-blue-200/80 text-blue-950 shadow-2xs'
+                  : 'bg-amber-50 border border-amber-200/80 text-amber-950 shadow-2xs'
+              }`}
+            >
+              {formatInlineMarkdown(raw)}
+            </div>
           );
         }
-        return <p key={i}>{raw}</p>;
+
+        // Bullet point
+        if (raw.startsWith('•') || raw.startsWith('- ') || raw.startsWith('* ')) {
+          const bulletContent = raw.replace(/^[•\-\*]\s*/, '');
+          return (
+            <div key={i} className="flex items-start gap-2 pl-1 text-xs sm:text-sm text-slate-700">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#093a96] flex-shrink-0 mt-2" />
+              <div className="flex-1 leading-relaxed">{formatInlineMarkdown(bulletContent)}</div>
+            </div>
+          );
+        }
+
+        // Regular paragraph with inline markdown
+        return (
+          <p key={i} className="text-xs sm:text-sm text-slate-800 leading-relaxed">
+            {formatInlineMarkdown(raw)}
+          </p>
+        );
       })}
     </div>
   );
@@ -566,6 +643,8 @@ const IntakeConversation = ({ program, session: initialSession, user, onComplete
 // =============================================================================
 // PHASE 3 — FORM REVIEW + PRINT
 // =============================================================================
+// PHASE 3 — FORM REVIEW + PRINT & EXPORT
+// =============================================================================
 const FormReview = ({ program, session, user, onBack, onSave, isSaving, onReviewInVault, autoSaved, returnOpportunity, onBackToOpportunity }) => {
   const [editableFields, setEditableFields] = useState(() => buildEditableFieldsFromSession(session));
   const [editingId, setEditingId] = useState(null);
@@ -585,8 +664,8 @@ const FormReview = ({ program, session, user, onBack, onSave, isSaving, onReview
     );
   };
 
-  const handleDownloadDoc = () => {
-    downloadApplicationAsDoc(
+  const handleDownloadPdf = () => {
+    downloadApplicationAsPdf(
       {
         name: session.template.title,
         programTitle: program.title,
@@ -597,6 +676,16 @@ const FormReview = ({ program, session, user, onBack, onSave, isSaving, onReview
       },
       user
     );
+  };
+
+  // Auto-save whenever a field edit is committed (no manual Save button needed)
+  const handleCommitEdit = (fieldId, value) => {
+    const updated = { ...editableFields, [fieldId]: value };
+    setEditableFields(updated);
+    setEditingId(null);
+    if (onSave) {
+      onSave(updated, { silent: true });
+    }
   };
 
   const sourceColor = {
@@ -619,15 +708,23 @@ const FormReview = ({ program, session, user, onBack, onSave, isSaving, onReview
         </button>
         <div className="flex-1 min-w-[180px]">
           <div className="flex items-center gap-2">
-            <CheckCircle2 className="w-5 h-5 text-emerald-500" />
+            <CheckCircle2 className="w-5 h-5 text-emerald-500 flex-shrink-0" />
             <h2 className="text-base font-extrabold text-slate-900">Application Complete</h2>
-            {autoSaved && !isSaving && (
-              <span className="text-[10px] font-bold bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">
-                ✓ Auto-saved to Vault
-              </span>
-            )}
+            <span className="text-[10px] font-bold bg-emerald-100 text-emerald-700 px-2.5 py-0.5 rounded-full flex items-center gap-1 border border-emerald-200 shadow-2xs">
+              {isSaving ? (
+                <>
+                  <RefreshCw className="w-3 h-3 animate-spin text-emerald-600" />
+                  <span>Saving...</span>
+                </>
+              ) : (
+                <>
+                  <Check className="w-3 h-3 text-emerald-600" />
+                  <span>Auto-saved to Vault</span>
+                </>
+              )}
+            </span>
           </div>
-          <p className="text-xs text-slate-500">{session.template.title}</p>
+          <p className="text-xs text-slate-500 truncate">{session.template.title}</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           {autoSaved && (
@@ -637,26 +734,17 @@ const FormReview = ({ program, session, user, onBack, onSave, isSaving, onReview
               className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-blue-50 border border-blue-200 text-xs font-bold text-[#093a96] hover:bg-blue-100 transition-colors cursor-pointer"
             >
               <FolderOpen className="w-3.5 h-3.5" />
-              Review in Vault
+              <span>Review in Vault</span>
             </button>
           )}
           <button
             type="button"
-            onClick={() => onSave(editableFields)}
-            disabled={isSaving}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-50 border border-emerald-200 text-xs font-bold text-emerald-700 hover:bg-emerald-100 transition-colors cursor-pointer disabled:opacity-50"
+            onClick={handleDownloadPdf}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold transition-colors cursor-pointer border border-slate-200/80 shadow-2xs"
+            title="Download formatted official PDF document"
           >
-            {isSaving ? <RefreshCw className="w-3.5 h-3.5 animate-spin text-emerald-600" /> : <Save className="w-3.5 h-3.5 text-emerald-600" />}
-            {isSaving ? 'Saving...' : autoSaved ? 'Save Changes' : 'Save'}
-          </button>
-          <button
-            type="button"
-            onClick={handleDownloadDoc}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition-colors cursor-pointer"
-            title="Download formatted DOC file"
-          >
-            <Download className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Download</span> .DOC
+            <Download className="w-3.5 h-3.5 text-slate-600" />
+            <span>Download PDF</span>
           </button>
           <button
             type="button"
@@ -664,7 +752,7 @@ const FormReview = ({ program, session, user, onBack, onSave, isSaving, onReview
             className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#093a96] text-white text-xs font-bold hover:bg-blue-700 transition-colors cursor-pointer shadow-md shadow-blue-900/20"
           >
             <Printer className="w-3.5 h-3.5" />
-            Print Application
+            <span>Print Application</span>
           </button>
         </div>
       </div>
@@ -708,7 +796,10 @@ const FormReview = ({ program, session, user, onBack, onSave, isSaving, onReview
 
           {/* Form fields */}
           <div className="space-y-3">
-            <h3 className="text-sm font-extrabold text-slate-700">Filled Application Fields</h3>
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-extrabold text-slate-700">Filled Application Fields</h3>
+              <span className="text-[11px] text-slate-400 italic">Click Edit to modify — changes save automatically</span>
+            </div>
             {session.template.fields.map((field) => {
               const entry = session.filledFields[field.id];
               const src = entry?.source || 'profile';
@@ -743,12 +834,20 @@ const FormReview = ({ program, session, user, onBack, onSave, isSaving, onReview
                           type="text"
                           value={editableFields[field.id]}
                           onChange={(e) => setEditableFields((prev) => ({ ...prev, [field.id]: e.target.value }))}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              handleCommitEdit(field.id, editableFields[field.id]);
+                            }
+                          }}
+                          onBlur={() => handleCommitEdit(field.id, editableFields[field.id])}
                           className="flex-1 text-sm text-slate-900 border border-[#093a96] rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-[#093a96]/20"
                         />
                         <button
                           type="button"
-                          onClick={() => setEditingId(null)}
+                          onClick={() => handleCommitEdit(field.id, editableFields[field.id])}
                           className="px-3 py-1.5 bg-[#093a96] text-white rounded-lg text-xs font-bold cursor-pointer"
+                          title="Save & confirm"
                         >
                           <Check className="w-3.5 h-3.5" />
                         </button>
@@ -1032,8 +1131,12 @@ export const ApplicationIntakeAgent = ({ preselectedBenefitId = null }) => {
     setReturnOpportunity(null);
   };
 
-  const handleBackToIntake = () => {
-    setPhase('intake');
+  const handleBackFromReview = () => {
+    if (returnOpportunity) {
+      handleBackToOpportunity();
+    } else {
+      handleBackToSelect();
+    }
   };
 
   return (
@@ -1059,7 +1162,7 @@ export const ApplicationIntakeAgent = ({ preselectedBenefitId = null }) => {
           program={selectedProgram}
           session={session}
           user={user}
-          onBack={handleBackToIntake}
+          onBack={handleBackFromReview}
           onSave={handleSave}
           isSaving={isSaving}
           onReviewInVault={handleReviewInVault}

@@ -44,6 +44,7 @@ import { IOSSegmentedControl } from '../common/IOSSegmentedControl';
 import { IOSSheet } from '../common/IOSSheet';
 import { auditVaultDocuments, calculateOpportunityDocumentGaps, getDocumentPlaceholderThumbnail } from '../../services/docAgentService';
 import {
+  downloadApplicationAsPdf,
   downloadApplicationAsDoc,
   printApplicationDocument,
   generateDocFormattedHtml,
@@ -431,12 +432,12 @@ export const DocumentsView = () => {
 
                           <button
                             type="button"
-                            onClick={() => downloadApplicationAsDoc(form, user)}
+                            onClick={() => downloadApplicationAsPdf(form, user)}
                             className="p-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 transition-all cursor-pointer inline-flex items-center gap-1 text-[11px] font-bold"
-                            title="Download Word-compatible .DOC file"
+                            title="Download official PDF document"
                           >
                             <Download className="w-3.5 h-3.5 text-slate-600" />
-                            <span className="hidden lg:inline">.DOC</span>
+                            <span className="hidden lg:inline">PDF</span>
                           </button>
 
                           <button
@@ -954,12 +955,12 @@ export const DocumentsView = () => {
                     </button>
                     <button
                       type="button"
-                      onClick={() => downloadApplicationAsDoc(activeDocumentForPreview, user)}
+                      onClick={() => downloadApplicationAsPdf(activeDocumentForPreview, user)}
                       className="px-3 py-1.5 rounded-xl bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold border border-slate-200 transition-all flex items-center gap-1 cursor-pointer"
-                      title="Download as Word DOC"
+                      title="Download official PDF document"
                     >
                       <Download className="w-3.5 h-3.5" />
-                      <span>Download .DOC</span>
+                      <span>Download PDF</span>
                     </button>
                     <button
                       type="button"

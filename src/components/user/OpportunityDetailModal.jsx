@@ -41,7 +41,7 @@ import logoImg from '../../assets/AIlogos.png';
 // or certificate) when its wording matches these patterns — that's the one item ALALAY
 // can actually fill out on the citizen's behalf, rather than something they must upload.
 const isApplicationFormRequirement = (name = '') =>
-  /application form|filled out|official.*(government )?form|registration form/i.test(name);
+  /application form|filled out|official.*(government )?form|registration form|pmrf|intake form|e-6|form e-6|duly accomplished/i.test(name);
 
 import { AiMessageRenderer } from '../common/AiMessageRenderer';
 
